@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RadialTiles Configurator</title>
+    <style>
+        :root {
+            --bg: #09090b;
+            --card: #18181b;
+            --border: #27272a;
+            --text: #f4f4f5;
+            --muted: #a1a1aa;
+            --amber: #f59e0b;
+            --green: #10b981;
+            --cyan: #06b6d4;
+            --purple: #8b5cf6;
+            --red: #ef4444;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background: var(--bg); color: var(--text); padding: 16px; max-width: 600px; margin: 0 auto; line-height: 1.5; }
+        header { text-align: center; margin-bottom: 20px; padding-top: 6px; }
+        header h1 { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        header p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; margin-bottom: 20px; }
+        .card h2 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: #fff; }
+        label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+        input, select, textarea { width: 100%; background: #09090b; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; color: #fff; font-size: 14px; margin-bottom: 12px; outline: none; }
+        input:focus, select:focus, textarea:focus { border-color: var(--amber); }
+        .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; padding: 12px; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer; border: none; transition: 0.2s; }
+        .btn-primary { background: linear-gradient(135deg, #f59e0b, #d97706); color: #000; }
+        .btn-secondary { background: #27272a; color: #fff; margin-bottom: 12px; }
+        .btn-save { background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-size: 16px; padding: 15px; margin-top: 10px; }
+        .btn-del-tile { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); padding: 5px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-del-tile:hover { background: rgba(239, 68, 68, 0.3); }
+        .tile-tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; }
+        .tile-tab { background: #27272a; color: #a1a1aa; padding: 8px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; white-space: nowrap; }
+        .tile-tab.active { background: #f59e0b; color: #000; font-weight: 700; }
+        .btn-add-tab { background: #3f3f46; color: #fff; padding: 8px 14px; border-radius: 20px; font-size: 13px; cursor: pointer; border: none; }
+        .preview-container { display: flex; justify-content: center; margin: 16px 0; }
+        .watch-frame { width: 220px; height: 220px; border-radius: 50%; background: #000; border: 6px solid #27272a; position: relative; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+        .btn-config-card { background: #121215; border: 1px solid #27272a; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+        .color-swatches { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .swatch { width: 28px; height: 28px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
+        .swatch.selected { border-color: #fff; transform: scale(1.15); }
+        .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .toggle-row input { width: auto; margin: 0; }
+        #toast { display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #10b981; color: #fff; padding: 12px 24px; border-radius: 30px; font-weight: bold; box-shadow: 0 4px 20px rgba(0,0,0,0.6); z-index: 100; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>RadialTiles Configurator</h1>
+        <p>Pixel Watch 4 45mm &bull; Multi-Tile Controller</p>
+    </header>
+
+    <div class="card">
+        <h2>🔑 Home Assistant Connection</h2>
+        <label>Nabu Casa or Remote URL</label>
+        <input type="text" id="haUrl" placeholder="https://xxxxxx.ui.nabu.casa">
+        
+        <label>Local LAN URL (Optional, for instant home response)</label>
+        <input type="text" id="localHaUrl" placeholder="http://192.168.1.100:8123">
+
+        <label>Long-Lived Access Token</label>
+        <textarea id="haToken" rows="3" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."></textarea>
+
+        <button class="btn btn-secondary" onclick="fetchEntities()">🔄 Test Connection & Load Entities</button>
+        <div id="connectionStatus" style="font-size: 13px; color: var(--amber); margin-bottom: 8px;"></div>
+    </div>
+
+    <div class="card">
+        <h2>⏱️ Multi-Tile Manager</h2>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 12px;">
+            Configure up to 4 swipeable tiles for your watch home screen carousel.
+        </p>
+
+        <div class="tile-tabs" id="tileTabsContainer"></div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="margin: 0;">Tile / Room Title</label>
+            <button class="btn-del-tile" onclick="deleteCurrentTile()" title="Delete this tile">🗑️ Delete Tile</button>
+        </div>
+        <input type="text" id="pageTitle" value="Bathroom" oninput="onTitleChanged(this.value)">
+
+        <label>Button Count & Layout</label>
+        <select id="buttonCount" onchange="onButtonCountChanged()">
+            <option value="1">1 Button (Full 360° Circle)</option>
+            <option value="2">2 Buttons (Semicircles 180°)</option>
+            <option value="3">3 Buttons (120° Slices)</option>
+            <option value="4" selected>4 Buttons (Quadrants 90° - Recommended)</option>
+            <option value="5">5 Buttons (72° Slices)</option>
+            <option value="6">6 Buttons (2 Columns × 3 Rows Grid)</option>
+        </select>
+
+        <div class="preview-container">
+            <div class="watch-frame" id="watchPreview"></div>
+        </div>
+
+        <div id="buttonsList"></div>
+    </div>
+
+    <div class="card">
+        <h2>⚡ Sensory Feedback Settings</h2>
+        <div class="toggle-row">
+            <span>Pixel Watch LRA Haptic Waveforms</span>
+            <input type="checkbox" id="hapticsToggle" checked>
+        </div>
+        <div class="toggle-row">
+            <span>Auditory Feedback (Clicks & Chimes)</span>
+            <input type="checkbox" id="audioToggle" checked>
+        </div>
+    </div>
+
+    <button class="btn btn-save" onclick="saveToWatch()">🚀 Save All Tiles & Sync to Watch</button>
+    <div id="toast">Saved to Watch Successfully!</div>
+
+    <datalist id="haEntitiesDatalist"></datalist>
+
+    <script>
+        const PRESET_COLORS = ['#FFB300', '#00E676', '#00E5FF', '#FF5252', '#7C4DFF', '#448AFF', '#FF4081', '#FF9100'];
+        let entitiesList = [];
+        let activePageIndex = 0;
+        let pages = [
+            {
+                id: "tile_1",
+                title: "Bathroom",
+                buttons: [
+                    { name: "Ceiling", entityId: "light.bathroom_ceiling", colorHex: "#FFB300", iconName: "lightbulb" },
+                    { name: "Mirror", entityId: "light.bathroom_mirror", colorHex: "#00E676", iconName: "lightbulb" },
+                    { name: "Fan", entityId: "switch.bathroom_fan", colorHex: "#00E5FF", iconName: "fan" },
+                    { name: "Relax", entityId: "scene.bathroom_relax", colorHex: "#7C4DFF", iconName: "scene" }
+                ]
+            }
+        ];
+
+        window.onload = function() {
+            // Restore cached entities if available
+            try {
+                const cached = localStorage.getItem('cached_ha_entities');
+                if (cached) {
+                    entitiesList = JSON.parse(cached);
+                    createDatalist(entitiesList);
+                }
+            } catch(e) {}
+
+            loadConfigFromWatch();
+        };
+
+        function loadConfigFromWatch() {
+            fetch('/api/config')
+                .then(r => r.json())
+                .then(cfg => {
+                    if (cfg.haBaseUrl) document.getElementById('haUrl').value = cfg.haBaseUrl;
+                    if (cfg.localHaUrl) document.getElementById('localHaUrl').value = cfg.localHaUrl;
+                    if (cfg.haToken) document.getElementById('haToken').value = cfg.haToken;
+                    document.getElementById('hapticsToggle').checked = cfg.hapticsEnabled !== false;
+                    document.getElementById('audioToggle').checked = cfg.audioEnabled !== false;
+                    if (cfg.pages && cfg.pages.length > 0) {
+                        pages = cfg.pages;
+                    }
+                    activePageIndex = Math.min(activePageIndex, pages.length - 1);
+                    renderTabs();
+                    loadActivePageUI();
+
+                    // Automatically load entities if credentials are saved
+                    if (cfg.haToken && (cfg.haBaseUrl || cfg.localHaUrl)) {
+                        fetchEntities();
+                    }
+                })
+                .catch(e => {
+                    renderTabs();
+                    loadActivePageUI();
+                });
+        }
+
+        function renderTabs() {
+            const container = document.getElementById('tileTabsContainer');
+            container.innerHTML = '';
+            pages.forEach((p, idx) => {
+                const tab = document.createElement('div');
+                tab.className = 'tile-tab' + (idx === activePageIndex ? ' active' : '');
+                tab.textContent = `Tile ${idx + 1}: ${p.title}`;
+                tab.onclick = () => {
+                    activePageIndex = idx;
+                    renderTabs();
+                    loadActivePageUI();
+                };
+                container.appendChild(tab);
+            });
+
+            if (pages.length < 4) {
+                const addBtn = document.createElement('button');
+                addBtn.className = 'btn-add-tab';
+                addBtn.textContent = '+ Add Tile';
+                addBtn.onclick = addNewTile;
+                container.appendChild(addBtn);
+            }
+        }
+
+        function addNewTile() {
+            if (pages.length >= 4) return;
+            const newIndex = pages.length + 1;
+            pages.push({
+                id: `tile_${newIndex}`,
+                title: `Room ${newIndex}`,
+                buttons: [
+                    { name: "Light 1", entityId: "", colorHex: "#FFB300", iconName: "lightbulb" },
+                    { name: "Light 2", entityId: "", colorHex: "#00E676", iconName: "lightbulb" },
+                    { name: "Fan", entityId: "", colorHex: "#00E5FF", iconName: "fan" },
+                    { name: "Power", entityId: "", colorHex: "#FF5252", iconName: "power" }
+                ]
+            });
+            activePageIndex = pages.length - 1;
+            renderTabs();
+            loadActivePageUI();
+        }
+
+        function deleteCurrentTile() {
+            if (pages.length <= 1) {
+                alert("You must keep at least one tile.");
+                return;
+            }
+            const curTitle = pages[activePageIndex]?.title || `Tile ${activePageIndex + 1}`;
+            if (confirm(`Are you sure you want to delete "${curTitle}"?`)) {
+                pages.splice(activePageIndex, 1);
+                activePageIndex = Math.max(0, activePageIndex - 1);
+                renderTabs();
+                loadActivePageUI();
+            }
+        }
+
+        function loadActivePageUI() {
+            const page = pages[activePageIndex];
+            if (!page) return;
+            document.getElementById('pageTitle').value = page.title;
+            document.getElementById('buttonCount').value = Math.min(6, Math.max(1, page.buttons.length));
+            renderButtonCards();
+            updatePreview();
+        }
+
+        function onTitleChanged(val) {
+            pages[activePageIndex].title = val;
+            renderTabs();
+            updatePreview();
+        }
+
+        function onButtonCountChanged() {
+            const count = parseInt(document.getElementById('buttonCount').value);
+            const page = pages[activePageIndex];
+            while (page.buttons.length < count) {
+                const i = page.buttons.length;
+                page.buttons.push({
+                    name: "Btn " + (i + 1),
+                    entityId: "",
+                    colorHex: PRESET_COLORS[i % PRESET_COLORS.length],
+                    iconName: "lightbulb"
+                });
+            }
+            if (page.buttons.length > count) {
+                page.buttons = page.buttons.slice(0, count);
+            }
+            renderButtonCards();
+            updatePreview();
+        }
+
+        function onLabelInput(btnIdx, val) {
+            pages[activePageIndex].buttons[btnIdx].name = val;
+            updatePreview();
+        }
+
+        function onEntityInput(btnIdx, val) {
+            const page = pages[activePageIndex];
+            const btn = page.buttons[btnIdx];
+            btn.entityId = val.trim();
+            updatePreview();
+
+            // If typed value matches an entity in the loaded list, auto-fill label & icon in-place
+            const trimmed = val.trim().toLowerCase();
+            const matched = entitiesList.find(e => e.entity_id.toLowerCase() === trimmed);
+            if (matched) {
+                applyEntityMatch(btnIdx, matched);
+            }
+        }
+
+        function onEntityDropdownSelect(btnIdx, val) {
+        function applyEntityMatch(btnIdx, matched) {
+            const page = pages[activePageIndex];
+            const btn = page.buttons[btnIdx];
+
+            // Auto-populate label if blank or default
+            if (!btn.name || btn.name.startsWith("Btn ") || btn.name.startsWith("Button ") || btn.name.startsWith("Light ")) {
+                const fn = matched.friendly_name || matched.entity_id.split('.')[1] || "";
+                btn.name = fn.length > 9 ? fn.split(' ').pop() : fn;
+                const labelInput = document.getElementById('btn_label_' + btnIdx);
+                if (labelInput) labelInput.value = btn.name;
+            }
+
+            // Auto-detect icon based on domain
+            const domain = matched.entity_id.split('.')[0];
+            let icon = 'lightbulb';
+            if (domain === 'fan') icon = 'fan';
+            else if (domain === 'scene') icon = 'scene';
+            else if (domain === 'switch') icon = 'power';
+            else if (domain === 'climate') icon = 'heat';
+            else if (domain === 'water_heater') icon = 'water';
+
+            btn.iconName = icon;
+            const iconSelect = document.getElementById('btn_icon_' + btnIdx);
+            if (iconSelect) iconSelect.value = icon;
+        }
+
+        function onIconChange(btnIdx, val) {
+            pages[activePageIndex].buttons[btnIdx].iconName = val;
+            updatePreview();
+        }
+
+        function onColorSelect(btnIdx, colorHex) {
+            pages[activePageIndex].buttons[btnIdx].colorHex = colorHex;
+            const titleEl = document.getElementById('btn_title_' + btnIdx);
+            if (titleEl) titleEl.style.color = colorHex;
+
+            const card = document.getElementById('btn_card_' + btnIdx);
+            if (card) {
+                const swatches = card.querySelectorAll('.swatch');
+                swatches.forEach(s => {
+                    if (s.dataset.color.toUpperCase() === colorHex.toUpperCase()) {
+                        s.classList.add('selected');
+                    } else {
+                        s.classList.remove('selected');
+                    }
+                });
+            }
+            updatePreview();
+        }
+
+        function renderButtonCards() {
+            const container = document.getElementById('buttonsList');
+            container.innerHTML = '';
+            const page = pages[activePageIndex];
+            if (!page) return;
+
+            page.buttons.forEach((btn, idx) => {
+                const card = document.createElement('div');
+                card.className = 'btn-config-card';
+                card.id = 'btn_card_' + idx;
+
+                card.innerHTML = `
+                    <div class="btn-card-title" id="btn_title_${idx}" style="font-weight: bold; margin-bottom: 8px; color: ${btn.colorHex};">Button ${idx + 1}</div>
+                    <label>Label</label>
+                    <input type="text" id="btn_label_${idx}" value="${btn.name}" oninput="onLabelInput(${idx}, this.value)">
+                    
+                    <label>Home Assistant Entity ID</label>
+                    <input type="text" id="btn_entity_${idx}" list="haEntitiesDatalist" value="${btn.entityId}" 
+                           placeholder="Type to search e.g. light.bathroom_ceiling" 
+                           oninput="onEntityInput(${idx}, this.value)">
+
+                    <label>Icon</label>
+                    <select id="btn_icon_${idx}" onchange="onIconChange(${idx}, this.value)">
+                        <option value="lightbulb" ${btn.iconName === 'lightbulb' ? 'selected' : ''}>💡 Lightbulb</option>
+                        <option value="fan" ${btn.iconName === 'fan' ? 'selected' : ''}>🌀 Exhaust Fan</option>
+                        <option value="scene" ${btn.iconName === 'scene' ? 'selected' : ''}>✨ Scene / Relax</option>
+                        <option value="power" ${btn.iconName === 'power' ? 'selected' : ''}>⏻ Power / Switch</option>
+                        <option value="heat" ${btn.iconName === 'heat' ? 'selected' : ''}>♨ Heater</option>
+                        <option value="water" ${btn.iconName === 'water' ? 'selected' : ''}>🚿 Shower</option>
+                        <option value="moon" ${btn.iconName === 'moon' ? 'selected' : ''}>🌙 Nightlight</option>
+                    </select>
+
+                    <label>Accent Color</label>
+                    <div class="color-swatches">
+                        ${PRESET_COLORS.map(c => `
+                            <div class="swatch ${btn.colorHex.toUpperCase() === c.toUpperCase() ? 'selected' : ''}" 
+                                 data-color="${c}"
+                                 style="background: ${c};" 
+                                 onclick="onColorSelect(${idx}, '${c}')"></div>
+                        `).join('')}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function updatePreview() {
+            const preview = document.getElementById('watchPreview');
+            const page = pages[activePageIndex];
+            if (!page) return;
+            const count = page.buttons.length;
+            if (count === 6) {
+                preview.innerHTML = `
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; height: 100%; width: 100%; gap: 3px; padding: 6px;">
+                        ${page.buttons.map(b => `
+                            <div style="background: ${b.colorHex}33; border: 1.5px solid ${b.colorHex}; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #fff;">
+                                <span>${getGlyph(b.iconName)}</span>
+                                <span>${b.name}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                const cx = 110, cy = 110, r = 105;
+                const sweep = 360 / count;
+                const offset = count === 2 ? 180 : (count === 4 ? -135 : (count === 1 ? 0 : -90));
+                
+                let svg = `<svg viewBox="0 0 220 220" width="220" height="220">`;
+                if (count === 1) {
+                    const b = page.buttons[0];
+                    svg += `<circle cx="110" cy="110" r="105" fill="${b.colorHex}44" stroke="${b.colorHex}" stroke-width="3" />`;
+                    svg += `<text x="110" y="105" fill="#fff" font-size="28" text-anchor="middle">${getGlyph(b.iconName)}</text>`;
+                    svg += `<text x="110" y="130" fill="#fff" font-size="14" font-weight="bold" text-anchor="middle">${b.name}</text>`;
+                } else {
+                    page.buttons.forEach((b, i) => {
+                        const start = offset + i * sweep;
+                        const end = start + sweep - 2;
+                        const p = describeArc(cx, cy, r, start, end);
+                        const mid = (start + end) / 2 * Math.PI / 180;
+                        const iconR = r * 0.58;
+                        const ix = cx + iconR * Math.cos(mid);
+                        const iy = cy + iconR * Math.sin(mid);
+
+                        svg += `<path d="${p}" fill="${b.colorHex}44" stroke="${b.colorHex}" stroke-width="2" />`;
+                        svg += `<text x="${ix}" y="${iy - 4}" fill="#fff" font-size="18" text-anchor="middle">${getGlyph(b.iconName)}</text>`;
+                        svg += `<text x="${ix}" y="${iy + 14}" fill="#fff" font-size="11" font-weight="bold" text-anchor="middle">${b.name}</text>`;
+                    });
+                }
+                svg += `</svg>`;
+                preview.innerHTML = svg;
+            }
+        }
+
+        function getGlyph(name) {
+            switch(name) {
+                case 'lightbulb': return '💡';
+                case 'fan': return '🌀';
+                case 'scene': return '✨';
+                case 'power': return '⏻';
+                case 'heat': return '♨';
+                case 'water': return '🚿';
+                case 'moon': return '🌙';
+                default: return '💡';
+            }
+        }
+
+        function describeArc(x, y, radius, startAngle, endAngle) {
+            const start = polarToCartesian(x, y, radius, endAngle);
+            const end = polarToCartesian(x, y, radius, startAngle);
+            const arcSweep = endAngle - startAngle <= 180 ? "0" : "1";
+            return ["M", x, y, "L", end.x, end.y, "A", radius, radius, 0, arcSweep, 0, start.x, start.y, "Z"].join(" ");
+        }
+
+        function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
+            const angleInRadians = (angleInDegrees * Math.PI) / 180.0;
+            return {
+                x: centerX + (radius * Math.cos(angleInRadians)),
+                y: centerY + (radius * Math.sin(angleInRadians))
+            };
+        }
+
+        function fetchEntities() {
+            const haUrl = document.getElementById('haUrl').value.trim();
+            const localHaUrl = document.getElementById('localHaUrl').value.trim();
+            const haToken = document.getElementById('haToken').value.trim();
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.textContent = 'Contacting Home Assistant...';
+
+            fetch('/api/test_ha', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: haUrl, localUrl: localHaUrl, token: haToken })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    statusDiv.style.color = '#10b981';
+                    statusDiv.textContent = '✓ ' + (data.message || 'Connected!') + ' (' + data.entities.length + ' entities)';
+                    entitiesList = data.entities;
+                    try {
+                        localStorage.setItem('cached_ha_entities', JSON.stringify(entitiesList));
+                    } catch(e) {}
+                    createDatalist(data.entities);
+                    renderButtonCards();
+                } else {
+                    statusDiv.style.color = '#ef4444';
+                    statusDiv.textContent = '✗ ' + (data.message || 'Connection failed');
+                }
+            })
+            .catch(e => {
+                statusDiv.style.color = '#ef4444';
+                statusDiv.textContent = 'Error: ' + e;
+            });
+        }
+
+        function createDatalist(entities) {
+            let dl = document.getElementById('haEntitiesDatalist');
+            if (!dl) {
+                dl = document.createElement('datalist');
+                dl.id = 'haEntitiesDatalist';
+                document.body.appendChild(dl);
+            }
+            dl.innerHTML = entities.map(e => `
+                <option value="${e.entity_id}">${e.friendly_name ? e.friendly_name + ' (' + e.entity_id + ')' : e.entity_id}</option>
+            `).join('');
+        }
+
+        function saveToWatch() {
+            const payload = {
+                haBaseUrl: document.getElementById('haUrl').value.trim(),
+                localHaUrl: document.getElementById('localHaUrl').value.trim(),
+                haToken: document.getElementById('haToken').value.trim(),
+                hapticsEnabled: document.getElementById('hapticsToggle').checked,
+                audioEnabled: document.getElementById('audioToggle').checked,
+                pages: pages.map((p, pIdx) => ({
+                    id: p.id || `tile_${pIdx + 1}`,
+                    title: p.title || `Tile ${pIdx + 1}`,
+                    buttons: p.buttons.map((b, i) => ({
+                        id: b.id || `btn_${pIdx + 1}_${i + 1}`,
+                        name: b.name,
+                        entityId: b.entityId,
+                        colorHex: b.colorHex,
+                        iconName: b.iconName,
+                        domain: b.entityId.includes('.') ? b.entityId.split('.')[0] : 'light'
+                    }))
+                }))
+            };
+
+            fetch('/api/save_config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json())
+            .then(data => {
+                const toast = document.getElementById('toast');
+                toast.style.display = 'block';
+                setTimeout(() => { toast.style.display = 'none'; }, 3000);
+            })
+            .catch(e => alert("Error saving to watch: " + e));
+        }
+    </script>
+</body>
+</html>

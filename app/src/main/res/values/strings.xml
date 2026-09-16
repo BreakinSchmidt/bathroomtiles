@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">RadialTiles</string>
+    <string name="tile_name">Radial Dashboard</string>
+    <string name="loading">Connecting...</string>
+    <string name="config_title">Setup on Phone</string>
+    <string name="settings_title">Settings</string>
+</resources>

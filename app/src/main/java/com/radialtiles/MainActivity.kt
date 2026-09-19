@@ -8,13 +8,11 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.*
 import com.radialtiles.data.server.WebConfigServer
 import com.radialtiles.presentation.screens.ConfigServerScreen
-import com.radialtiles.presentation.screens.DashboardScreen
 import com.radialtiles.presentation.screens.SettingsScreen
 import com.radialtiles.presentation.theme.RadialTilesTheme
 import com.radialtiles.presentation.viewmodel.DashboardViewModel
 
 enum class AppScreen {
-    DASHBOARD,
     SETTINGS,
     CONFIG_SERVER
 }
@@ -27,7 +25,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Keep screen on while interacting with tiles
+        // Keep screen on while configuring
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         // Initialize embedded web server for phone configurator
@@ -42,34 +40,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RadialTilesTheme {
-                var currentScreen by remember { mutableStateOf(AppScreen.DASHBOARD) }
-
+                var currentScreen by remember { mutableStateOf(AppScreen.SETTINGS) }
                 val config by viewModel.config.collectAsState()
-                val entityStates by viewModel.entityStates.collectAsState()
-                val loadingEntityIds by viewModel.loadingEntityIds.collectAsState()
 
                 when (currentScreen) {
-                    AppScreen.DASHBOARD -> {
-                        DashboardScreen(
-                            config = config,
-                            entityStates = entityStates,
-                            loadingEntityIds = loadingEntityIds,
-                            onButtonClick = { button ->
-                                viewModel.onButtonClick(button)
-                            },
-                            onOpenSettings = {
-                                currentScreen = AppScreen.SETTINGS
-                            },
-                            onOpenSetup = {
-                                webServer?.start()
-                                currentScreen = AppScreen.CONFIG_SERVER
-                            },
-                            onCrownTick = {
-                                viewModel.hapticManager.vibrateCrownTick()
-                            }
-                        )
-                    }
-
                     AppScreen.SETTINGS -> {
                         SettingsScreen(
                             hapticsEnabled = config.hapticsEnabled,
@@ -82,7 +56,7 @@ class MainActivity : ComponentActivity() {
                                 currentScreen = AppScreen.CONFIG_SERVER
                             },
                             onBack = {
-                                currentScreen = AppScreen.DASHBOARD
+                                finish()
                             }
                         )
                     }
@@ -94,7 +68,7 @@ class MainActivity : ComponentActivity() {
                                 onDone = {
                                     srv.stop()
                                     viewModel.refreshStates()
-                                    currentScreen = AppScreen.DASHBOARD
+                                    currentScreen = AppScreen.SETTINGS
                                 }
                             )
                         }

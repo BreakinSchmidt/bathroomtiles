@@ -92,7 +92,7 @@ fun SettingsScreen(
                     .height(34.dp),
                 colors = ButtonDefaults.primaryButtonColors(backgroundColor = Color(0xFF27272A))
             ) {
-                Text("Back", color = Color.White)
+                Text("Close", color = Color.White)
             }
         }
     }

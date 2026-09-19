@@ -136,81 +136,218 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
             .setId("open_app_page_$pageIndex")
             .build()
 
-        val contentColumn = LayoutElementBuilders.Column.Builder()
-            .setWidth(DimensionBuilders.expand())
-            .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+        val titleModifiers = ModifiersBuilders.Modifiers.Builder()
+            .setClickable(titleClickable)
+            .build()
+
+        val titleText = Text.Builder(this, page.title.uppercase())
+            .setTypography(Typography.TYPOGRAPHY_CAPTION1)
+            .setColor(ColorBuilders.argb(0xFFF59E0B.toInt()))
+            .setModifiers(titleModifiers)
+            .build()
 
         val buttons = page.buttons
+        val buttonsLayout = buildButtonsLayout(buttons)
 
-        if (buttons.isEmpty()) {
-            contentColumn.addContent(
-                CompactChip.Builder(this, "Open App to Setup", titleClickable, requestParams.deviceConfiguration)
+        val mainColumn = LayoutElementBuilders.Column.Builder()
+            .setWidth(DimensionBuilders.expand())
+            .setHeight(DimensionBuilders.expand())
+            .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+            .addContent(
+                LayoutElementBuilders.Spacer.Builder()
+                    .setHeight(DimensionBuilders.dp(10f))
                     .build()
             )
-        } else {
-            // Group buttons into rows of 2
-            val chunked = buttons.take(6).chunked(2)
-            chunked.forEachIndexed { rowIndex, rowButtons ->
-                val rowBuilder = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+            .addContent(titleText)
+            .addContent(
+                LayoutElementBuilders.Spacer.Builder()
+                    .setHeight(DimensionBuilders.dp(5f))
+                    .build()
+            )
+            .addContent(buttonsLayout)
+            .build()
 
-                rowButtons.forEachIndexed { colIndex, btn ->
-                    if (colIndex > 0) {
-                        rowBuilder.addContent(
-                            LayoutElementBuilders.Spacer.Builder()
-                                .setWidth(DimensionBuilders.dp(4f))
-                                .build()
-                        )
-                    }
+        return LayoutElementBuilders.Box.Builder()
+            .setWidth(DimensionBuilders.expand())
+            .setHeight(DimensionBuilders.expand())
+            .addContent(mainColumn)
+            .build()
+    }
 
-                    val clickAction = ActionBuilders.LoadAction.Builder().build()
-                    val buttonClickable = ModifiersBuilders.Clickable.Builder()
-                        .setOnClick(clickAction)
-                        .setId("toggle:${btn.entityId}:${btn.domain}")
-                        .build()
-
-                    val glyph = com.radialtiles.util.IconMapper.getGlyph(btn.iconName, btn.domain) + " "
-
-                    val chipColor = parseArgbColor(btn.colorHex)
-                    val chipColors = androidx.wear.protolayout.material.ChipColors(
-                        ColorBuilders.argb(chipColor),
-                        ColorBuilders.argb(0xFFFFFFFF.toInt())
-                    )
-                    val chip = CompactChip.Builder(
-                        this,
-                        "$glyph${btn.name.take(7)}",
-                        buttonClickable,
-                        requestParams.deviceConfiguration
-                    ).setChipColors(chipColors)
-
-                    rowBuilder.addContent(chip.build())
-                }
-
-                contentColumn.addContent(rowBuilder.build())
-                if (rowIndex < chunked.size - 1) {
-                    contentColumn.addContent(
-                        LayoutElementBuilders.Spacer.Builder()
-                            .setHeight(DimensionBuilders.dp(4f))
-                            .build()
-                    )
-                }
-            }
+    private fun buildButtonsLayout(buttons: List<ButtonConfig>): LayoutElementBuilders.LayoutElement {
+        if (buttons.isEmpty()) {
+            return Text.Builder(this, "Tap to setup in app").build()
         }
 
-        return PrimaryLayout.Builder(requestParams.deviceConfiguration)
-            .setPrimaryLabelTextContent(
-                Text.Builder(this, page.title)
-                    .setTypography(Typography.TYPOGRAPHY_TITLE3)
-                    .setColor(ColorBuilders.argb(0xFFFFB300.toInt()))
-                    .setModifiers(
-                        ModifiersBuilders.Modifiers.Builder()
-                            .setClickable(titleClickable)
-                            .build()
-                    )
+        return when (buttons.size) {
+            1 -> {
+                buildDialButton(buttons[0], widthDp = 135f, heightDp = 135f, cornerRadiusDp = 67f, iconTypography = Typography.TYPOGRAPHY_DISPLAY3)
+            }
+            2 -> {
+                LayoutElementBuilders.Column.Builder()
+                    .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+                    .addContent(buildDialButton(buttons[0], widthDp = 150f, heightDp = 68f, cornerRadiusDp = 28f))
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(DimensionBuilders.dp(5f)).build())
+                    .addContent(buildDialButton(buttons[1], widthDp = 150f, heightDp = 68f, cornerRadiusDp = 28f))
+                    .build()
+            }
+            3 -> {
+                val row1 = LayoutElementBuilders.Row.Builder()
+                    .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+                    .addContent(buildDialButton(buttons[0], widthDp = 86f, heightDp = 68f, cornerRadiusDp = 22f))
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.dp(5f)).build())
+                    .addContent(buildDialButton(buttons[1], widthDp = 86f, heightDp = 68f, cornerRadiusDp = 22f))
+                    .build()
+
+                val row2 = buildDialButton(buttons[2], widthDp = 135f, heightDp = 62f, cornerRadiusDp = 22f)
+
+                LayoutElementBuilders.Column.Builder()
+                    .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+                    .addContent(row1)
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(DimensionBuilders.dp(5f)).build())
+                    .addContent(row2)
+                    .build()
+            }
+            4 -> {
+                // 2x2 Quadrant layout (Matching the 4-quadrant radial dial)
+                val row1 = LayoutElementBuilders.Row.Builder()
+                    .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+                    .addContent(buildDialButton(buttons[0], widthDp = 88f, heightDp = 68f, cornerRadiusDp = 24f))
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.dp(5f)).build())
+                    .addContent(buildDialButton(buttons[1], widthDp = 88f, heightDp = 68f, cornerRadiusDp = 24f))
+                    .build()
+
+                val row2 = LayoutElementBuilders.Row.Builder()
+                    .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+                    .addContent(buildDialButton(buttons[2], widthDp = 88f, heightDp = 68f, cornerRadiusDp = 24f))
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.dp(5f)).build())
+                    .addContent(buildDialButton(buttons[3], widthDp = 88f, heightDp = 68f, cornerRadiusDp = 24f))
+                    .build()
+
+                LayoutElementBuilders.Column.Builder()
+                    .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+                    .addContent(row1)
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(DimensionBuilders.dp(5f)).build())
+                    .addContent(row2)
+                    .build()
+            }
+            5 -> {
+                val row1 = LayoutElementBuilders.Row.Builder()
+                    .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+                    .addContent(buildDialButton(buttons[0], widthDp = 82f, heightDp = 46f, cornerRadiusDp = 18f))
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.dp(4f)).build())
+                    .addContent(buildDialButton(buttons[1], widthDp = 82f, heightDp = 46f, cornerRadiusDp = 18f))
+                    .build()
+
+                val row2 = buildDialButton(buttons[2], widthDp = 125f, heightDp = 44f, cornerRadiusDp = 18f)
+
+                val row3 = LayoutElementBuilders.Row.Builder()
+                    .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+                    .addContent(buildDialButton(buttons[3], widthDp = 82f, heightDp = 46f, cornerRadiusDp = 18f))
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.dp(4f)).build())
+                    .addContent(buildDialButton(buttons[4], widthDp = 82f, heightDp = 46f, cornerRadiusDp = 18f))
+                    .build()
+
+                LayoutElementBuilders.Column.Builder()
+                    .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+                    .addContent(row1)
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(DimensionBuilders.dp(4f)).build())
+                    .addContent(row2)
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(DimensionBuilders.dp(4f)).build())
+                    .addContent(row3)
+                    .build()
+            }
+            else -> {
+                // 6 Buttons: 2x3 Contoured Grid
+                val col = LayoutElementBuilders.Column.Builder()
+                    .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+
+                val chunked = buttons.take(6).chunked(2)
+                chunked.forEachIndexed { rIdx, rowButtons ->
+                    val row = LayoutElementBuilders.Row.Builder()
+                        .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+
+                    val w = if (rIdx == 1) 90f else 80f
+                    rowButtons.forEachIndexed { cIdx, b ->
+                        if (cIdx > 0) {
+                            row.addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.dp(4f)).build())
+                        }
+                        row.addContent(buildDialButton(b, widthDp = w, heightDp = 44f, cornerRadiusDp = 16f))
+                    }
+                    col.addContent(row.build())
+                    if (rIdx < chunked.size - 1) {
+                        col.addContent(LayoutElementBuilders.Spacer.Builder().setHeight(DimensionBuilders.dp(3f)).build())
+                    }
+                }
+                col.build()
+            }
+        }
+    }
+
+    private fun buildDialButton(
+        btn: ButtonConfig,
+        widthDp: Float,
+        heightDp: Float,
+        cornerRadiusDp: Float,
+        iconTypography: Int = Typography.TYPOGRAPHY_TITLE2
+    ): LayoutElementBuilders.LayoutElement {
+        val clickAction = ActionBuilders.LoadAction.Builder().build()
+        val buttonClickable = ModifiersBuilders.Clickable.Builder()
+            .setOnClick(clickAction)
+            .setId("toggle:${btn.entityId}:${btn.domain}")
+            .build()
+
+        val baseColor = parseArgbColor(btn.colorHex)
+        val bgColor = (baseColor and 0x00FFFFFF) or 0x48000000.toInt()
+        val borderColor = (baseColor and 0x00FFFFFF) or 0xAA000000.toInt()
+
+        val corner = ModifiersBuilders.Corner.Builder()
+            .setRadius(DimensionBuilders.dp(cornerRadiusDp))
+            .build()
+
+        val background = ModifiersBuilders.Background.Builder()
+            .setColor(ColorBuilders.argb(bgColor))
+            .setCorner(corner)
+            .build()
+
+        val border = ModifiersBuilders.Border.Builder()
+            .setColor(ColorBuilders.argb(borderColor))
+            .setWidth(DimensionBuilders.dp(1.5f))
+            .build()
+
+        val modifiers = ModifiersBuilders.Modifiers.Builder()
+            .setBackground(background)
+            .setBorder(border)
+            .setClickable(buttonClickable)
+            .build()
+
+        val glyph = com.radialtiles.util.IconMapper.getGlyph(btn.iconName, btn.domain)
+
+        val iconText = Text.Builder(this, glyph)
+            .setTypography(iconTypography)
+            .build()
+
+        val labelText = Text.Builder(this, btn.name.take(7))
+            .setTypography(Typography.TYPOGRAPHY_CAPTION2)
+            .setColor(ColorBuilders.argb(0xFFFFFFFF.toInt()))
+            .build()
+
+        val col = LayoutElementBuilders.Column.Builder()
+            .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+            .addContent(iconText)
+            .addContent(
+                LayoutElementBuilders.Spacer.Builder()
+                    .setHeight(DimensionBuilders.dp(2f))
                     .build()
             )
-            .setContent(contentColumn.build())
+            .addContent(labelText)
+            .build()
+
+        return LayoutElementBuilders.Box.Builder()
+            .setWidth(DimensionBuilders.dp(widthDp))
+            .setHeight(DimensionBuilders.dp(heightDp))
+            .setModifiers(modifiers)
+            .addContent(col)
             .build()
     }
 

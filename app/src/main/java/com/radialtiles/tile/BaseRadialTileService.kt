@@ -1,6 +1,5 @@
 package com.radialtiles.tile
 
-import android.graphics.Bitmap
 import android.util.Log
 import androidx.concurrent.futures.ResolvableFuture
 import androidx.wear.protolayout.*
@@ -22,12 +21,23 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.io.ByteArrayOutputStream
 
 abstract class BaseRadialTileService(private val pageIndex: Int) : TileService() {
 
     companion object {
         private const val TAG = "BaseRadialTileService"
+
+        // Counter for generating unique clickable tokens per tile build
+        private val tokenCounter = java.util.concurrent.atomic.AtomicLong(1L)
+
+        // Bounded set of handled click tokens to prevent duplicate / ambient re-triggers
+        private val handledTokens = java.util.Collections.newSetFromMap(
+            object : java.util.LinkedHashMap<String, Boolean>(64, 0.75f, true) {
+                override fun removeEldestEntry(eldest: Map.Entry<String, Boolean>?): Boolean {
+                    return size > 100
+                }
+            }
+        )
     }
 
     override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> {
@@ -36,9 +46,12 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val repository = TileConfigRepository(applicationContext)
-                val config = repository.configFlow.first()
-                val hapticManager = HapticFeedbackManager(applicationContext)
-                hapticManager.isEnabled = config.hapticsEnabled
+                val config = TileConfigRepository.cachedConfig
+                    ?: repository.configFlow.first().also { TileConfigRepository.cachedConfig = it }
+
+                val hapticManager = HapticFeedbackManager(applicationContext).apply {
+                    isEnabled = config.hapticsEnabled
+                }
 
                 val haClient = HomeAssistantClient(
                     getBaseUrl = { config.haBaseUrl },
@@ -46,15 +59,40 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                     getToken = { config.haToken }
                 )
 
-                // 1. Handle in-place tile button click if user tapped a sector on the home screen
+                // 1. Handle in-place tile button click if user tapped a sector on the watch
                 val lastClickableId = requestParams.currentState?.lastClickableId
+
                 if (lastClickableId != null && lastClickableId.startsWith("toggle:")) {
                     val parts = lastClickableId.split(":")
-                    if (parts.size >= 3) {
+                    if (parts.size >= 4) {
                         val entityId = parts[1]
                         val domain = parts[2]
-                        haClient.toggleEntity(entityId, domain)
-                        hapticManager.vibrateToggleOn()
+                        val token = parts[3]
+
+                        // Atomically verify and consume this click token
+                        val isNewClick = synchronized(handledTokens) {
+                            handledTokens.add(token)
+                        }
+
+                        if (isNewClick) {
+                            val isSceneOrAutomation = domain in listOf("scene", "automation", "script")
+                            if (isSceneOrAutomation) {
+                                hapticManager.vibrateScene()
+                            } else {
+                                hapticManager.vibrateToggleOn()
+                            }
+
+                            // Fire HA toggle asynchronously in background
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    haClient.toggleEntity(entityId, domain)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed HA toggle for $entityId", e)
+                                }
+                            }
+                        } else {
+                            Log.d(TAG, "Suppressing duplicate click with token: $token")
+                        }
                     }
                 }
 
@@ -64,12 +102,20 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                     pages.firstOrNull() ?: DialPageConfig("p$pageIndex", "Tile ${pageIndex + 1}", emptyList())
                 }
 
-                // Dynamic resource version based on button config to bust ProtoLayout resource cache on changes
+                // Pre-warm the cache in background so subsequent renders are 0ms
+                if (page.buttons.isNotEmpty()) {
+                    CoroutineScope(Dispatchers.Default).launch {
+                        RadialTileBitmapRenderer.prewarmCache(page, 454)
+                    }
+                }
+
                 val buttonsKey = page.buttons.joinToString("|") { "${it.id}_${it.name}_${it.colorHex}_${it.iconName}" }
-                val resourceVersion = "${page.id}_${buttonsKey.hashCode()}"
+                val baseVersion = "${page.id}_${buttonsKey.hashCode()}"
+                val currentToken = "tok_${pageIndex}_${tokenCounter.incrementAndGet()}"
+                val resourceVersion = "${baseVersion}__TS__${currentToken}"
 
                 // 3. Build ProtoLayout with interactive radial dial
-                val rootLayout = buildRadialTileLayout(page, requestParams)
+                val rootLayout = buildRadialTileLayout(page, requestParams, currentToken)
 
                 val timelineEntry = TimelineBuilders.TimelineEntry.Builder()
                     .setLayout(
@@ -121,7 +167,8 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
 
     private fun buildRadialTileLayout(
         page: DialPageConfig,
-        requestParams: RequestBuilders.TileRequest
+        requestParams: RequestBuilders.TileRequest,
+        token: String
     ): LayoutElementBuilders.LayoutElement {
         val rootBox = LayoutElementBuilders.Box.Builder()
             .setWidth(DimensionBuilders.expand())
@@ -155,7 +202,7 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                 .build()
         }
 
-        // 1. Dial image background (Rendered radial dial matching in-app Canvas)
+        // 1. Dial image background (Rendered radial dial)
         val dialImage = LayoutElementBuilders.Image.Builder()
             .setResourceId("dial_image_$pageIndex")
             .setWidth(DimensionBuilders.expand())
@@ -164,114 +211,115 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
         rootBox.addContent(dialImage)
 
         // 2. Clickable touch sectors overlay
-        val overlay = buildClickableTouchOverlay(page.buttons)
+        val overlay = buildClickableTouchOverlay(page.buttons, token)
         rootBox.addContent(overlay)
-
-        // 3. Tile title at top center (tappable to open app)
-        val launchAppAction = ActionBuilders.LaunchAction.Builder()
-            .setAndroidActivity(
-                ActionBuilders.AndroidActivity.Builder()
-                    .setPackageName(packageName)
-                    .setClassName(MainActivity::class.java.name)
-                    .build()
-            )
-            .build()
-
-        val titleClickable = ModifiersBuilders.Clickable.Builder()
-            .setOnClick(launchAppAction)
-            .setId("open_app_page_$pageIndex")
-            .build()
-
-        val titleText = Text.Builder(this, page.title.uppercase())
-            .setTypography(Typography.TYPOGRAPHY_CAPTION2)
-            .setColor(ColorBuilders.argb(0xFFF59E0B.toInt()))
-            .setModifiers(ModifiersBuilders.Modifiers.Builder().setClickable(titleClickable).build())
-            .build()
-
-        val titleColumn = LayoutElementBuilders.Column.Builder()
-            .setWidth(DimensionBuilders.expand())
-            .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(DimensionBuilders.dp(8f)).build())
-            .addContent(titleText)
-            .build()
-
-        rootBox.addContent(titleColumn)
 
         return rootBox.build()
     }
 
-    private fun buildClickableTouchOverlay(buttons: List<ButtonConfig>): LayoutElementBuilders.LayoutElement {
+    private fun buildClickableTouchOverlay(buttons: List<ButtonConfig>, token: String): LayoutElementBuilders.LayoutElement {
         val count = buttons.size
         if (count == 0) return LayoutElementBuilders.Box.Builder().build()
 
         return when (count) {
             1 -> {
-                buildTouchSector(buttons[0])
+                buildTouchSector(buttons[0], token)
             }
             2 -> {
                 // Top half -> button 0, Bottom half -> button 1
                 LayoutElementBuilders.Column.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.expand())
-                    .addContent(buildTouchSector(buttons[0], heightWeight = 1f))
-                    .addContent(buildTouchSector(buttons[1], heightWeight = 1f))
+                    .addContent(buildTouchSector(buttons[0], token, heightWeight = 1f))
+                    .addContent(buildTouchSector(buttons[1], token, heightWeight = 1f))
                     .build()
             }
             3 -> {
-                // Top row: button 0 (left), button 1 (right); Bottom half: button 2
+                // Slices: 0 is Top-Right, 1 is Bottom, 2 is Top-Left
                 val topRow = LayoutElementBuilders.Row.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[0], widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[1], widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[2], token, widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[0], token, widthWeight = 1f))
                     .build()
 
                 LayoutElementBuilders.Column.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.expand())
                     .addContent(topRow)
-                    .addContent(buildTouchSector(buttons[2], heightWeight = 1f))
+                    .addContent(buildTouchSector(buttons[1], token, heightWeight = 1f))
                     .build()
             }
             4 -> {
-                // 4 Quadrants: Top-left, Top-right, Bottom-left, Bottom-right
-                val topRow = LayoutElementBuilders.Row.Builder()
+                // Slices: 0 is North, 1 is East, 2 is South, 3 is West
+                val topRow = buildTouchSector(buttons[0], token, heightWeight = 1f)
+                val midRow = LayoutElementBuilders.Row.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[0], widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[1], widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[3], token, widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[1], token, widthWeight = 1f))
                     .build()
-
-                val bottomRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[2], widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[3], widthWeight = 1f))
-                    .build()
+                val botRow = buildTouchSector(buttons[2], token, heightWeight = 1f)
 
                 LayoutElementBuilders.Column.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.expand())
                     .addContent(topRow)
-                    .addContent(bottomRow)
+                    .addContent(midRow)
+                    .addContent(botRow)
                     .build()
             }
             5 -> {
-                // Top row: 0, 1; Middle: 2; Bottom row: 3, 4
+                // Slices: 0 (Top-Right), 1 (Mid-Right), 2 (Bottom), 3 (Mid-Left), 4 (Top-Left)
                 val topRow = LayoutElementBuilders.Row.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[0], widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[1], widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[4], token, widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[0], token, widthWeight = 1f))
                     .build()
 
-                val midRow = buildTouchSector(buttons[2], heightWeight = 1f)
-
-                val bottomRow = LayoutElementBuilders.Row.Builder()
+                val midRow = LayoutElementBuilders.Row.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[3], widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[4], widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[3], token, widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[1], token, widthWeight = 1f))
+                    .build()
+
+                val botRow = buildTouchSector(buttons[2], token, heightWeight = 1f)
+
+                LayoutElementBuilders.Column.Builder()
+                    .setWidth(DimensionBuilders.expand())
+                    .setHeight(DimensionBuilders.expand())
+                    .addContent(topRow)
+                    .addContent(midRow)
+                    .addContent(botRow)
+                    .build()
+            }
+            6 -> {
+                // 6 Radial buttons layout:
+                // Slices rotate clockwise starting at 12 o'clock (-90°):
+                // 0: Top-Right (12-2 o'clock), 1: Mid-Right (2-4 o'clock), 2: Bot-Right (4-6 o'clock)
+                // 3: Bot-Left (6-8 o'clock),   4: Mid-Left (8-10 o'clock), 5: Top-Left (10-12 o'clock)
+                val topRow = LayoutElementBuilders.Row.Builder()
+                    .setWidth(DimensionBuilders.expand())
+                    .setHeight(DimensionBuilders.weight(1f))
+                    .addContent(buildTouchSector(buttons[5], token, widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[0], token, widthWeight = 1f))
+                    .build()
+
+                val midRow = LayoutElementBuilders.Row.Builder()
+                    .setWidth(DimensionBuilders.expand())
+                    .setHeight(DimensionBuilders.weight(1.1f))
+                    .addContent(buildTouchSector(buttons[4], token, widthWeight = 1.1f))
+                    .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.weight(0.8f)).build())
+                    .addContent(buildTouchSector(buttons[1], token, widthWeight = 1.1f))
+                    .build()
+
+                val botRow = LayoutElementBuilders.Row.Builder()
+                    .setWidth(DimensionBuilders.expand())
+                    .setHeight(DimensionBuilders.weight(1f))
+                    .addContent(buildTouchSector(buttons[3], token, widthWeight = 1f))
+                    .addContent(buildTouchSector(buttons[2], token, widthWeight = 1f))
                     .build()
 
                 LayoutElementBuilders.Column.Builder()
@@ -279,11 +327,11 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                     .setHeight(DimensionBuilders.expand())
                     .addContent(topRow)
                     .addContent(midRow)
-                    .addContent(bottomRow)
+                    .addContent(botRow)
                     .build()
             }
             else -> {
-                // 6 Buttons Grid: 2 columns x 3 rows
+                // Fallback for > 6 buttons: 2 columns x rows grid
                 val col = LayoutElementBuilders.Column.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.expand())
@@ -294,7 +342,7 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                         .setWidth(DimensionBuilders.expand())
                         .setHeight(DimensionBuilders.weight(1f))
                     rowButtons.forEach { b ->
-                        row.addContent(buildTouchSector(b, widthWeight = 1f))
+                        row.addContent(buildTouchSector(b, token, widthWeight = 1f))
                     }
                     col.addContent(row.build())
                 }
@@ -305,13 +353,15 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
 
     private fun buildTouchSector(
         btn: ButtonConfig,
+        token: String,
         widthWeight: Float? = null,
         heightWeight: Float? = null
     ): LayoutElementBuilders.LayoutElement {
         val clickAction = ActionBuilders.LoadAction.Builder().build()
         val clickable = ModifiersBuilders.Clickable.Builder()
             .setOnClick(clickAction)
-            .setId("toggle:${btn.entityId}:${btn.domain}")
+            .setId("toggle:${btn.entityId}:${btn.domain}:$token")
+            .setVisualFeedbackEnabled(true)
             .build()
 
         val modifiers = ModifiersBuilders.Modifiers.Builder()
@@ -342,32 +392,20 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val repository = TileConfigRepository(applicationContext)
-                val config = repository.configFlow.first()
+                val config = TileConfigRepository.cachedConfig
+                    ?: repository.configFlow.first().also { TileConfigRepository.cachedConfig = it }
                 val pages = config.pages.ifEmpty { AppConfiguration.defaultPages() }
                 val page = pages.getOrElse(pageIndex) {
                     pages.firstOrNull() ?: DialPageConfig("p$pageIndex", "Tile ${pageIndex + 1}", emptyList())
                 }
 
-                // Render dynamic dial bitmap matching in-app Canvas
-                val bitmap = RadialTileBitmapRenderer.renderDialBitmap(page, sizePx = 454)
-                val stream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-                val bytes = stream.toByteArray()
-
-                val inlineImage = ResourceBuilders.InlineImageResource.Builder()
-                    .setData(bytes)
-                    .setWidthPx(454)
-                    .setHeightPx(454)
-                    .setFormat(ResourceBuilders.IMAGE_FORMAT_UNDEFINED)
-                    .build()
-
-                val imageResource = ResourceBuilders.ImageResource.Builder()
-                    .setInlineResource(inlineImage)
-                    .build()
-
+                val normalBytes = RadialTileBitmapRenderer.getNormalDialBytes(page, 454)
                 val resources = ResourceBuilders.Resources.Builder()
                     .setVersion(requestParams.version)
-                    .addIdToImageMapping("dial_image_$pageIndex", imageResource)
+                    .addIdToImageMapping(
+                        "dial_image_$pageIndex",
+                        createInlineImageResource(normalBytes)
+                    )
                     .build()
 
                 future.set(resources)
@@ -381,5 +419,18 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
         }
 
         return future
+    }
+
+    private fun createInlineImageResource(bytes: ByteArray): ResourceBuilders.ImageResource {
+        val inlineImage = ResourceBuilders.InlineImageResource.Builder()
+            .setData(bytes)
+            .setWidthPx(454)
+            .setHeightPx(454)
+            .setFormat(ResourceBuilders.IMAGE_FORMAT_UNDEFINED)
+            .build()
+
+        return ResourceBuilders.ImageResource.Builder()
+            .setInlineResource(inlineImage)
+            .build()
     }
 }

@@ -24,6 +24,7 @@ class TileConfigRepository(private val context: Context) {
 
     companion object {
         val KEY_CONFIG_JSON = stringPreferencesKey("app_config_json")
+        @Volatile var cachedConfig: AppConfiguration? = null
     }
 
     val configFlow: Flow<AppConfiguration> = context.dataStore.data
@@ -36,7 +37,7 @@ class TileConfigRepository(private val context: Context) {
         }
         .map { preferences ->
             val jsonString = preferences[KEY_CONFIG_JSON]
-            if (!jsonString.isNullOrBlank()) {
+            val cfg = if (!jsonString.isNullOrBlank()) {
                 try {
                     json.decodeFromString<AppConfiguration>(jsonString)
                 } catch (e: Exception) {
@@ -45,9 +46,13 @@ class TileConfigRepository(private val context: Context) {
             } else {
                 AppConfiguration()
             }
+            cachedConfig = cfg
+            cfg
         }
 
     suspend fun saveConfiguration(config: AppConfiguration) {
+        cachedConfig = config
+        com.radialtiles.tile.RadialTileBitmapRenderer.clearCache()
         context.dataStore.edit { preferences ->
             preferences[KEY_CONFIG_JSON] = json.encodeToString(config)
         }
@@ -57,14 +62,18 @@ class TileConfigRepository(private val context: Context) {
     suspend fun updateHapticsEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             val current = loadCurrentConfig(preferences)
-            preferences[KEY_CONFIG_JSON] = json.encodeToString(current.copy(hapticsEnabled = enabled))
+            val updated = current.copy(hapticsEnabled = enabled)
+            cachedConfig = updated
+            preferences[KEY_CONFIG_JSON] = json.encodeToString(updated)
         }
     }
 
     suspend fun updateAudioEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             val current = loadCurrentConfig(preferences)
-            preferences[KEY_CONFIG_JSON] = json.encodeToString(current.copy(audioEnabled = enabled))
+            val updated = current.copy(audioEnabled = enabled)
+            cachedConfig = updated
+            preferences[KEY_CONFIG_JSON] = json.encodeToString(updated)
         }
     }
 

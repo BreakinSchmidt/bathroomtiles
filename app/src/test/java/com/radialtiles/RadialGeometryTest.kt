@@ -67,6 +67,30 @@ class RadialGeometryTest {
     }
 
     @Test
+    fun testSixRadialSectors() {
+        val cx = 100f
+        val cy = 100f
+
+        // Sector 0: 1 o'clock (Top-Right)
+        assertEquals(0, computeSectorIndex(125f, 57f, cx, cy, 6))
+
+        // Sector 1: 3 o'clock (Mid-Right)
+        assertEquals(1, computeSectorIndex(150f, 100f, cx, cy, 6))
+
+        // Sector 2: 5 o'clock (Bot-Right)
+        assertEquals(2, computeSectorIndex(125f, 143f, cx, cy, 6))
+
+        // Sector 3: 7 o'clock (Bot-Left)
+        assertEquals(3, computeSectorIndex(75f, 143f, cx, cy, 6))
+
+        // Sector 4: 9 o'clock (Mid-Left)
+        assertEquals(4, computeSectorIndex(50f, 100f, cx, cy, 6))
+
+        // Sector 5: 11 o'clock (Top-Left)
+        assertEquals(5, computeSectorIndex(75f, 57f, cx, cy, 6))
+    }
+
+    @Test
     fun testGrid2x3CellIndices() {
         val w = 200f
         val h = 200f
@@ -86,6 +110,7 @@ class RadialGeometryTest {
         // Bot-Right (Row 2, Col 1) -> 5
         assertEquals(5, computeGrid2x3Index(160f, 170f, w, h))
     }
+
 
     @Test
     fun testDomainInference() {

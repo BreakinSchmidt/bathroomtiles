@@ -52,11 +52,21 @@ class ModelSerializationTest {
     }
 
     @Test
-    fun testGridLayoutFlagForSixButtons() {
+    fun testPieLayoutFlagForSixButtons() {
         val sixButtons = (1..6).map {
             ButtonConfig("b$it", "light.light_$it", "L$it", "#00E676", "lightbulb", "light")
         }
-        val page = DialPageConfig("grid_page", "Grid Room", sixButtons)
+        val page = DialPageConfig("radial_page", "Radial Room", sixButtons)
+        assertTrue(page.isPieLayout)
+        assertEquals(false, page.isGridLayout)
+    }
+
+    @Test
+    fun testGridLayoutFlagForMoreThanSixButtons() {
+        val sevenButtons = (1..7).map {
+            ButtonConfig("b$it", "light.light_$it", "L$it", "#00E676", "lightbulb", "light")
+        }
+        val page = DialPageConfig("grid_page", "Grid Room", sevenButtons)
         assertTrue(page.isGridLayout)
         assertEquals(false, page.isPieLayout)
     }

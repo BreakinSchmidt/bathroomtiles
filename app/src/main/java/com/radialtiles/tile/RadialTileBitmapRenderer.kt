@@ -8,10 +8,30 @@ import kotlin.math.*
 
 object RadialTileBitmapRenderer {
 
+    private val dialBytesCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+
+    fun clearCache() {
+        dialBytesCache.clear()
+    }
+
+    fun getNormalDialBytes(page: DialPageConfig, sizePx: Int = 454): ByteArray {
+        val buttonsKey = page.buttons.joinToString("|") { "${it.id}_${it.colorHex}_${it.iconName}_${it.name}" }
+        val key = "${page.id}_${sizePx}_${buttonsKey}"
+        return dialBytesCache.computeIfAbsent(key) {
+            val bitmap = renderDialBitmap(page, sizePx)
+            val stream = java.io.ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            stream.toByteArray()
+        }
+    }
+
+    fun prewarmCache(page: DialPageConfig, sizePx: Int = 454) {
+        getNormalDialBytes(page, sizePx)
+    }
+
     fun renderDialBitmap(
         page: DialPageConfig,
-        sizePx: Int = 454,
-        entityStates: Map<String, Boolean> = emptyMap()
+        sizePx: Int = 454
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -23,10 +43,10 @@ object RadialTileBitmapRenderer {
         if (buttons.isEmpty()) return bitmap
 
         val count = buttons.size
-        if (count >= 6) {
-            renderGridBitmap(canvas, buttons.take(6), sizePx, entityStates)
+        if (count > 6) {
+            renderGridBitmap(canvas, buttons.take(6), sizePx)
         } else {
-            renderPieBitmap(canvas, buttons, count, sizePx, entityStates)
+            renderPieBitmap(canvas, buttons.take(6), count.coerceIn(1, 6), sizePx)
         }
 
         return bitmap
@@ -36,8 +56,7 @@ object RadialTileBitmapRenderer {
         canvas: Canvas,
         buttons: List<ButtonConfig>,
         count: Int,
-        sizePx: Int,
-        entityStates: Map<String, Boolean>
+        sizePx: Int
     ) {
         val cx = sizePx / 2f
         val cy = sizePx / 2f
@@ -60,20 +79,22 @@ object RadialTileBitmapRenderer {
 
         val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 3.5f
+            strokeWidth = 3.0f
         }
 
         val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = 38f
+            textSize = if (count >= 6) 32f else 38f
             textAlign = Paint.Align.CENTER
+            alpha = 200
         }
 
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = 22f
+            textSize = if (count >= 6) 18f else 22f
             textAlign = Paint.Align.CENTER
             isFakeBoldText = true
+            alpha = 200
         }
 
         val rectF = RectF(cx - outerRadius, cy - outerRadius, cx + outerRadius, cy + outerRadius)
@@ -81,11 +102,10 @@ object RadialTileBitmapRenderer {
         buttons.take(count).forEachIndexed { index, button ->
             val sliceStart = (startAngleOffset + index * sweepAngle + angleGap / 2f) % 360f
             val baseColor = parseColor(button.colorHex)
-            val isOn = entityStates[button.entityId] ?: false
 
-            val alpha = if (isOn) 0xD0 else 0x40
+            val alpha = 0x48
             val fillColor = (baseColor and 0x00FFFFFF) or (alpha shl 24)
-            val borderColor = if (isOn) Color.WHITE else ((baseColor and 0x00FFFFFF) or 0x90000000.toInt())
+            val borderColor = ((baseColor and 0x00FFFFFF) or 0x80000000.toInt())
 
             fillPaint.color = fillColor
             strokePaint.color = borderColor
@@ -113,7 +133,7 @@ object RadialTileBitmapRenderer {
             val glyph = IconMapper.getGlyph(button.iconName, button.domain)
             canvas.drawText(glyph, itemX, itemY - 6f, iconPaint)
 
-            val label = button.name.take(8)
+            val label = button.name.take(if (count >= 6) 7 else 8)
             val bounds = Rect()
             textPaint.getTextBounds(label, 0, label.length, bounds)
             canvas.drawText(label, itemX, itemY + bounds.height() + 14f, textPaint)
@@ -123,8 +143,7 @@ object RadialTileBitmapRenderer {
     private fun renderGridBitmap(
         canvas: Canvas,
         buttons: List<ButtonConfig>,
-        sizePx: Int,
-        entityStates: Map<String, Boolean>
+        sizePx: Int
     ) {
         val totalW = sizePx.toFloat()
         val totalH = sizePx.toFloat()
@@ -142,12 +161,14 @@ object RadialTileBitmapRenderer {
             color = Color.WHITE
             textSize = 32f
             textAlign = Paint.Align.CENTER
+            alpha = 200
         }
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = 20f
             textAlign = Paint.Align.CENTER
             isFakeBoldText = true
+            alpha = 200
         }
 
         for (row in 0..2) {
@@ -155,7 +176,6 @@ object RadialTileBitmapRenderer {
                 val idx = row * 2 + col
                 if (idx !in buttons.indices) continue
                 val button = buttons[idx]
-                val isOn = entityStates[button.entityId] ?: false
                 val baseColor = parseColor(button.colorHex)
 
                 val left = gap + col * (colWidth + gap)
@@ -165,9 +185,12 @@ object RadialTileBitmapRenderer {
                 val actualLeft = if (col == 0) left + hInset else left
                 val actualWidth = colWidth - hInset
 
-                val alpha = if (isOn) 0xD0 else 0x38
-                fillPaint.color = (baseColor and 0x00FFFFFF) or (alpha shl 24)
-                strokePaint.color = if (isOn) Color.WHITE else ((baseColor and 0x00FFFFFF) or 0x80000000.toInt())
+                val alpha = 0x48
+                val fillColor = (baseColor and 0x00FFFFFF) or (alpha shl 24)
+                val borderColor = ((baseColor and 0x00FFFFFF) or 0x80000000.toInt())
+
+                fillPaint.color = fillColor
+                strokePaint.color = borderColor
 
                 val rect = RectF(actualLeft, top, actualLeft + actualWidth, top + rowHeight)
                 canvas.drawRoundRect(rect, cornerRadius, cornerRadius, fillPaint)
@@ -199,3 +222,4 @@ object RadialTileBitmapRenderer {
         }
     }
 }
+

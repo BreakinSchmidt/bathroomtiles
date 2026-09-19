@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshStates()
+        com.radialtiles.tile.RadialTileUpdater.requestAllTilesUpdate(applicationContext)
     }
 
     override fun onDestroy() {

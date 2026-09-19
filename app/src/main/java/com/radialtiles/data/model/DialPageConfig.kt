@@ -9,14 +9,14 @@ data class DialPageConfig(
     val buttons: List<ButtonConfig>
 ) {
     /**
-     * Determines whether this page uses the pie chart layout (1 to 5 buttons)
-     * or the 2x3 grid layout (6 buttons).
+     * Determines whether this page uses the pie chart layout (1 to 6 buttons)
+     * or the grid layout (> 6 buttons).
      */
     val isPieLayout: Boolean
-        get() = buttons.size in 1..5
+        get() = buttons.size in 1..6
 
     val isGridLayout: Boolean
-        get() = buttons.size == 6
+        get() = buttons.size > 6
 }
 
 @Serializable

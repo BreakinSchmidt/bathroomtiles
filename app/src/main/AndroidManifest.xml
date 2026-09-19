@@ -34,10 +34,12 @@
         <service
             android:name=".tile.RadialTile1Service"
             android:exported="true"
+            android:icon="@drawable/ic_launcher"
             android:label="Radial Tile 1"
+            android:description="@string/tile_1_desc"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
             <intent-filter>
-                <action android:name="androidx.wear.tiles.action.BIND_UPDATE_REQUESTER" />
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
             </intent-filter>
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"
@@ -51,10 +53,12 @@
         <service
             android:name=".tile.RadialTile2Service"
             android:exported="true"
+            android:icon="@drawable/ic_launcher"
             android:label="Radial Tile 2"
+            android:description="@string/tile_2_desc"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
             <intent-filter>
-                <action android:name="androidx.wear.tiles.action.BIND_UPDATE_REQUESTER" />
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
             </intent-filter>
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"
@@ -65,10 +69,12 @@
         <service
             android:name=".tile.RadialTile3Service"
             android:exported="true"
+            android:icon="@drawable/ic_launcher"
             android:label="Radial Tile 3"
+            android:description="@string/tile_3_desc"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
             <intent-filter>
-                <action android:name="androidx.wear.tiles.action.BIND_UPDATE_REQUESTER" />
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
             </intent-filter>
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"
@@ -79,10 +85,12 @@
         <service
             android:name=".tile.RadialTile4Service"
             android:exported="true"
+            android:icon="@drawable/ic_launcher"
             android:label="Radial Tile 4"
+            android:description="@string/tile_4_desc"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
             <intent-filter>
-                <action android:name="androidx.wear.tiles.action.BIND_UPDATE_REQUESTER" />
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
             </intent-filter>
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"

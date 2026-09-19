@@ -1,6 +1,10 @@
 <resources>
     <string name="app_name">RadialTiles</string>
     <string name="tile_name">Radial Dashboard</string>
+    <string name="tile_1_desc">Interactive quick controls for Tile 1</string>
+    <string name="tile_2_desc">Interactive quick controls for Tile 2</string>
+    <string name="tile_3_desc">Interactive quick controls for Tile 3</string>
+    <string name="tile_4_desc">Interactive quick controls for Tile 4</string>
     <string name="loading">Connecting...</string>
     <string name="config_title">Setup on Phone</string>
     <string name="settings_title">Settings</string>

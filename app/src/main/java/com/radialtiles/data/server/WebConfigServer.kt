@@ -138,6 +138,10 @@ class WebConfigServer(
                                             put("entity_id", state.entity_id)
                                             put("friendly_name", state.friendlyName)
                                             put("state", state.state)
+                                            val icon = state.attributes?.get("icon")?.jsonPrimitive?.contentOrNull
+                                            if (icon != null) {
+                                                put("icon", icon)
+                                            }
                                         })
                                     }
                                 })

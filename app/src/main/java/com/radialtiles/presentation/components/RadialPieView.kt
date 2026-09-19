@@ -203,23 +203,8 @@ private fun DrawScope.drawPieSlice(
     val cx = center.x + centroidDistance * cos(midAngleRad)
     val cy = center.y + centroidDistance * sin(midAngleRad)
 
-    // Icon glyph (using sleek Unicode symbols for instant crisp rendering without resource loading overhead)
-    val iconGlyph = when (button.iconName.lowercase()) {
-        "lightbulb", "light" -> "💡"
-        "fan" -> "🌀"
-        "scene" -> "✨"
-        "power", "switch" -> "⏻"
-        "heat", "heater" -> "♨"
-        "water", "shower" -> "🚿"
-        "night", "moon" -> "🌙"
-        else -> when (button.domain) {
-            "light" -> "💡"
-            "fan" -> "🌀"
-            "scene" -> "✨"
-            "automation" -> "⚡"
-            else -> "⏻"
-        }
-    }
+    // Icon glyph with comprehensive Home Assistant / MDI support
+    val iconGlyph = com.radialtiles.util.IconMapper.getGlyph(button.iconName, button.domain)
 
     drawContext.canvas.nativeCanvas.apply {
         // Draw icon glyph

@@ -154,16 +154,7 @@ fun Grid2x3View(
                     val cellCx = actualLeft + actualWidth / 2f
                     val cellCy = top + rowHeight / 2f
 
-                    val iconGlyph = when (button.iconName.lowercase()) {
-                        "lightbulb", "light" -> "💡"
-                        "fan" -> "🌀"
-                        "scene" -> "✨"
-                        "power", "switch" -> "⏻"
-                        "heat", "heater" -> "♨"
-                        "water", "shower" -> "🚿"
-                        "night", "moon" -> "🌙"
-                        else -> "⏻"
-                    }
+                    val iconGlyph = com.radialtiles.util.IconMapper.getGlyph(button.iconName, button.domain)
 
                     drawContext.canvas.nativeCanvas.apply {
                         iconPaint.alpha = if (isOn || isPressed) 255 else 180

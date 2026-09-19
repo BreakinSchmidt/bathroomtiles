@@ -170,16 +170,7 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                         .setId("toggle:${btn.entityId}:${btn.domain}")
                         .build()
 
-                    val glyph = when (btn.iconName.lowercase()) {
-                        "lightbulb", "light" -> "💡 "
-                        "fan" -> "🌀 "
-                        "scene" -> "✨ "
-                        "power", "switch" -> "⏻ "
-                        "heat", "heater" -> "♨ "
-                        "water", "shower" -> "🚿 "
-                        "night", "moon" -> "🌙 "
-                        else -> "⏻ "
-                    }
+                    val glyph = com.radialtiles.util.IconMapper.getGlyph(btn.iconName, btn.domain) + " "
 
                     val chipColor = parseArgbColor(btn.colorHex)
                     val chipColors = androidx.wear.protolayout.material.ChipColors(

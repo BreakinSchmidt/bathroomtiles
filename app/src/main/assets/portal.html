@@ -117,8 +117,103 @@
     <div id="toast">Saved to Watch Successfully!</div>
 
     <datalist id="haEntitiesDatalist"></datalist>
+    <datalist id="haIconsDatalist"></datalist>
 
     <script>
+        const HA_ICONS = [
+            // Lights & Lamps
+            { name: "mdi:lightbulb", label: "💡 Lightbulb" },
+            { name: "mdi:ceiling-light", label: "🏮 Ceiling Light" },
+            { name: "mdi:wall-sconce", label: "🪔 Wall Sconce" },
+            { name: "mdi:lamp", label: "🛋️ Lamp / Desk Light" },
+            { name: "mdi:chandelier", label: "🪩 Chandelier" },
+            { name: "mdi:candle", label: "🕯️ Candle" },
+            { name: "mdi:spotlight", label: "🔦 Spotlight / Torch" },
+            { name: "mdi:led-strip", label: "〰️ LED Strip Light" },
+
+            // Fans, Climate & HVAC
+            { name: "mdi:fan", label: "🌀 Fan / Exhaust" },
+            { name: "mdi:ceiling-fan", label: "🌀 Ceiling Fan" },
+            { name: "mdi:air-conditioner", label: "❄️ AC / Cooling" },
+            { name: "mdi:snowflake", label: "❄️ Snowflake / Frost" },
+            { name: "mdi:radiator", label: "♨️ Radiator / Heater" },
+            { name: "mdi:fire", label: "🔥 Fireplace / Flame" },
+            { name: "mdi:thermometer", label: "🌡️ Thermostat / Temperature" },
+            { name: "mdi:humidifier", label: "💧 Humidifier" },
+            { name: "mdi:air-purifier", label: "🍃 Air Purifier" },
+
+            // Bath, Water & Plumbing
+            { name: "mdi:shower", label: "🚿 Shower" },
+            { name: "mdi:bathtub", label: "🛁 Bathtub" },
+            { name: "mdi:water", label: "💧 Water / Valve" },
+            { name: "mdi:water-boiler", label: "🫖 Water Heater / Boiler" },
+            { name: "mdi:faucet", label: "🚰 Faucet / Tap" },
+            { name: "mdi:toilet", label: "🚽 Toilet" },
+            { name: "mdi:pool", label: "🏊 Pool / Hot Tub" },
+            { name: "mdi:sprinkler", label: "💦 Sprinkler / Irrigation" },
+
+            // Power, Switches & Sockets
+            { name: "mdi:power", label: "⏻ Power / Toggle" },
+            { name: "mdi:power-plug", label: "🔌 Smart Plug / Outlet" },
+            { name: "mdi:flash", label: "⚡ Lightning / Energy" },
+            { name: "mdi:battery", label: "🔋 Battery" },
+
+            // Media & Entertainment
+            { name: "mdi:television", label: "📺 TV / Display" },
+            { name: "mdi:speaker", label: "🔊 Speaker / Audio" },
+            { name: "mdi:volume-high", label: "🔊 Volume High" },
+            { name: "mdi:volume-off", label: "🔇 Mute / Silence" },
+            { name: "mdi:music", label: "🎵 Music / Song" },
+            { name: "mdi:radio", label: "📻 Radio / Tuner" },
+            { name: "mdi:movie", label: "🎬 Movie / Cinema" },
+            { name: "mdi:gamepad", label: "🎮 Gaming Console" },
+            { name: "mdi:play", label: "▶️ Play / Media" },
+
+            // Rooms, Furniture & Living
+            { name: "mdi:bed", label: "🛏️ Bed / Bedroom" },
+            { name: "mdi:sofa", label: "🛋️ Sofa / Living Room" },
+            { name: "mdi:desk", label: "🖥️ Desk / Computer" },
+            { name: "mdi:table-chair", label: "🪑 Dining / Table" },
+            { name: "mdi:door", label: "🚪 Door" },
+            { name: "mdi:window-closed", label: "🪟 Window" },
+            { name: "mdi:blinds", label: "🪟 Blinds / Curtains / Shades" },
+            { name: "mdi:garage", label: "🚗 Garage" },
+            { name: "mdi:gate", label: "⛩️ Gate" },
+
+            // Security & Sensors
+            { name: "mdi:lock", label: "🔒 Lock / Secure" },
+            { name: "mdi:lock-open", label: "🔓 Unlock / Open" },
+            { name: "mdi:key", label: "🔑 Key" },
+            { name: "mdi:shield-home", label: "🛡️ Security System / Alarm" },
+            { name: "mdi:cctv", label: "📹 Security Camera" },
+            { name: "mdi:bell", label: "🔔 Doorbell" },
+            { name: "mdi:siren", label: "🚨 Siren / Alarm Alert" },
+            { name: "mdi:motion-sensor", label: "🏃 Motion Sensor" },
+            { name: "mdi:smoke-detector", label: "⚠️ Smoke / Hazard Alert" },
+
+            // Kitchen & Appliances
+            { name: "mdi:coffee", label: "☕ Coffee Maker" },
+            { name: "mdi:kettle", label: "🫖 Electric Kettle" },
+            { name: "mdi:refrigerator", label: "🧊 Refrigerator" },
+            { name: "mdi:microwave", label: "🍳 Microwave / Oven" },
+            { name: "mdi:dishwasher", label: "🍽️ Dishwasher" },
+            { name: "mdi:washing-machine", label: "🧺 Washing Machine" },
+            { name: "mdi:robot-vacuum", label: "🧹 Robot Vacuum" },
+
+            // Scenes, Automations & Celestial
+            { name: "mdi:sparkles", label: "✨ Scene / Relax" },
+            { name: "mdi:auto-fix", label: "🪄 Automation / Magic" },
+            { name: "mdi:robot", label: "🤖 Robot / Automation" },
+            { name: "mdi:clock", label: "⏱️ Timer / Schedule" },
+            { name: "mdi:weather-sunny", label: "☀️ Sun / Daylight" },
+            { name: "mdi:weather-night", label: "🌙 Moon / Nightlight" },
+
+            // Outdoors & Vehicles
+            { name: "mdi:plant", label: "🪴 Houseplant / Garden" },
+            { name: "mdi:tree", label: "🌲 Tree / Yard" },
+            { name: "mdi:car", label: "🚗 Car / EV Charger" }
+        ];
+
         const PRESET_COLORS = ['#FFB300', '#00E676', '#00E5FF', '#FF5252', '#7C4DFF', '#448AFF', '#FF4081', '#FF9100'];
         let entitiesList = [];
         let activePageIndex = 0;
@@ -136,6 +231,8 @@
         ];
 
         window.onload = function() {
+            populateIconsDatalist();
+
             // Restore cached entities if available
             try {
                 const cached = localStorage.getItem('cached_ha_entities');
@@ -147,6 +244,18 @@
 
             loadConfigFromWatch();
         };
+
+        function populateIconsDatalist() {
+            let dl = document.getElementById('haIconsDatalist');
+            if (!dl) {
+                dl = document.createElement('datalist');
+                dl.id = 'haIconsDatalist';
+                document.body.appendChild(dl);
+            }
+            dl.innerHTML = HA_ICONS.map(item => `
+                <option value="${item.name}">${item.label}</option>
+            `).join('');
+        }
 
         function loadConfigFromWatch() {
             fetch('/api/config')
@@ -296,22 +405,36 @@
                 if (labelInput) labelInput.value = btn.name;
             }
 
-            // Auto-detect icon based on domain
-            const domain = matched.entity_id.split('.')[0];
-            let icon = 'lightbulb';
-            if (domain === 'fan') icon = 'fan';
-            else if (domain === 'scene') icon = 'scene';
-            else if (domain === 'switch') icon = 'power';
-            else if (domain === 'climate') icon = 'heat';
-            else if (domain === 'water_heater') icon = 'water';
+            // Auto-detect icon based on entity attributes or domain
+            if (matched.icon) {
+                btn.iconName = matched.icon;
+            } else {
+                const domain = matched.entity_id.split('.')[0];
+                if (domain === 'fan') btn.iconName = 'mdi:fan';
+                else if (domain === 'scene') btn.iconName = 'mdi:sparkles';
+                else if (domain === 'switch') btn.iconName = 'mdi:power';
+                else if (domain === 'climate') btn.iconName = 'mdi:thermometer';
+                else if (domain === 'water_heater') btn.iconName = 'mdi:water-boiler';
+                else if (domain === 'media_player') btn.iconName = 'mdi:television';
+                else if (domain === 'cover') btn.iconName = 'mdi:blinds';
+                else if (domain === 'lock') btn.iconName = 'mdi:lock';
+                else if (domain === 'vacuum') btn.iconName = 'mdi:robot-vacuum';
+                else if (domain === 'camera') btn.iconName = 'mdi:cctv';
+                else btn.iconName = 'mdi:lightbulb';
+            }
 
-            btn.iconName = icon;
-            const iconSelect = document.getElementById('btn_icon_' + btnIdx);
-            if (iconSelect) iconSelect.value = icon;
+            const iconInput = document.getElementById('btn_icon_' + btnIdx);
+            if (iconInput) iconInput.value = btn.iconName;
+            const glyphEl = document.getElementById('btn_icon_glyph_' + btnIdx);
+            if (glyphEl) glyphEl.textContent = getGlyph(btn.iconName, btn.domain);
         }
 
-        function onIconChange(btnIdx, val) {
-            pages[activePageIndex].buttons[btnIdx].iconName = val;
+        function onIconInput(btnIdx, val) {
+            const page = pages[activePageIndex];
+            const btn = page.buttons[btnIdx];
+            btn.iconName = val.trim();
+            const glyphEl = document.getElementById('btn_icon_glyph_' + btnIdx);
+            if (glyphEl) glyphEl.textContent = getGlyph(btn.iconName, btn.domain);
             updatePreview();
         }
 
@@ -355,16 +478,14 @@
                            placeholder="Type to search e.g. light.bathroom_ceiling" 
                            oninput="onEntityInput(${idx}, this.value)">
 
-                    <label>Icon</label>
-                    <select id="btn_icon_${idx}" onchange="onIconChange(${idx}, this.value)">
-                        <option value="lightbulb" ${btn.iconName === 'lightbulb' ? 'selected' : ''}>💡 Lightbulb</option>
-                        <option value="fan" ${btn.iconName === 'fan' ? 'selected' : ''}>🌀 Exhaust Fan</option>
-                        <option value="scene" ${btn.iconName === 'scene' ? 'selected' : ''}>✨ Scene / Relax</option>
-                        <option value="power" ${btn.iconName === 'power' ? 'selected' : ''}>⏻ Power / Switch</option>
-                        <option value="heat" ${btn.iconName === 'heat' ? 'selected' : ''}>♨ Heater</option>
-                        <option value="water" ${btn.iconName === 'water' ? 'selected' : ''}>🚿 Shower</option>
-                        <option value="moon" ${btn.iconName === 'moon' ? 'selected' : ''}>🌙 Nightlight</option>
-                    </select>
+                    <label>Icon (Home Assistant / MDI)</label>
+                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+                        <span id="btn_icon_glyph_${idx}" style="font-size: 20px; width: 38px; height: 38px; min-width: 38px; display: flex; align-items: center; justify-content: center; background: #09090b; border: 1px solid var(--border); border-radius: 8px;">${getGlyph(btn.iconName, btn.domain)}</span>
+                        <input type="text" id="btn_icon_${idx}" list="haIconsDatalist" value="${btn.iconName}" 
+                               placeholder="Search e.g. mdi:fan, shower, tv..." 
+                               style="margin-bottom: 0;"
+                               oninput="onIconInput(${idx}, this.value)">
+                    </div>
 
                     <label>Accent Color</label>
                     <div class="color-swatches">
@@ -390,7 +511,7 @@
                     <div style="display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; height: 100%; width: 100%; gap: 3px; padding: 6px;">
                         ${page.buttons.map(b => `
                             <div style="background: ${b.colorHex}33; border: 1.5px solid ${b.colorHex}; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #fff;">
-                                <span>${getGlyph(b.iconName)}</span>
+                                <span style="font-size: 14px; margin-bottom: 2px;">${getGlyph(b.iconName, b.domain)}</span>
                                 <span>${b.name}</span>
                             </div>
                         `).join('')}
@@ -405,7 +526,7 @@
                 if (count === 1) {
                     const b = page.buttons[0];
                     svg += `<circle cx="110" cy="110" r="105" fill="${b.colorHex}44" stroke="${b.colorHex}" stroke-width="3" />`;
-                    svg += `<text x="110" y="105" fill="#fff" font-size="28" text-anchor="middle">${getGlyph(b.iconName)}</text>`;
+                    svg += `<text x="110" y="105" fill="#fff" font-size="28" text-anchor="middle">${getGlyph(b.iconName, b.domain)}</text>`;
                     svg += `<text x="110" y="130" fill="#fff" font-size="14" font-weight="bold" text-anchor="middle">${b.name}</text>`;
                 } else {
                     page.buttons.forEach((b, i) => {
@@ -418,7 +539,7 @@
                         const iy = cy + iconR * Math.sin(mid);
 
                         svg += `<path d="${p}" fill="${b.colorHex}44" stroke="${b.colorHex}" stroke-width="2" />`;
-                        svg += `<text x="${ix}" y="${iy - 4}" fill="#fff" font-size="18" text-anchor="middle">${getGlyph(b.iconName)}</text>`;
+                        svg += `<text x="${ix}" y="${iy - 4}" fill="#fff" font-size="18" text-anchor="middle">${getGlyph(b.iconName, b.domain)}</text>`;
                         svg += `<text x="${ix}" y="${iy + 14}" fill="#fff" font-size="11" font-weight="bold" text-anchor="middle">${b.name}</text>`;
                     });
                 }
@@ -427,16 +548,58 @@
             }
         }
 
-        function getGlyph(name) {
-            switch(name) {
-                case 'lightbulb': return '💡';
+        function getGlyph(name, domain) {
+            if (!name && domain) return getDomainGlyph(domain);
+            const clean = (name || '').trim().toLowerCase().replace(/^mdi:/, '');
+            if (!clean) return getDomainGlyph(domain);
+
+            // Exact or catalog match
+            const found = HA_ICONS.find(i => i.name.replace(/^mdi:/, '').toLowerCase() === clean);
+            if (found) return found.label.split(' ')[0];
+
+            // Keywords matching
+            if (clean.includes('light') || clean.includes('lamp') || clean.includes('bulb')) return '💡';
+            if (clean.includes('fan')) return '🌀';
+            if (clean.includes('heat') || clean.includes('radiat') || clean.includes('warm')) return '♨️';
+            if (clean.includes('cool') || clean.includes('snow') || clean.includes('ac')) return '❄️';
+            if (clean.includes('shower')) return '🚿';
+            if (clean.includes('bath') || clean.includes('tub')) return '🛁';
+            if (clean.includes('water') || clean.includes('drop')) return '💧';
+            if (clean.includes('tv') || clean.includes('screen') || clean.includes('display')) return '📺';
+            if (clean.includes('speak') || clean.includes('sound') || clean.includes('volume')) return '🔊';
+            if (clean.includes('music')) return '🎵';
+            if (clean.includes('plug') || clean.includes('outlet')) return '🔌';
+            if (clean.includes('lock')) return '🔒';
+            if (clean.includes('camera') || clean.includes('cctv')) return '📹';
+            if (clean.includes('bed') || clean.includes('sleep')) return '🛏️';
+            if (clean.includes('sofa') || clean.includes('couch')) return '🛋️';
+            if (clean.includes('door')) return '🚪';
+            if (clean.includes('window') || clean.includes('blind') || clean.includes('curtain')) return '🪟';
+            if (clean.includes('garage')) return '🚗';
+            if (clean.includes('bell')) return '🔔';
+            if (clean.includes('vacuum') || clean.includes('clean')) return '🧹';
+            if (clean.includes('coffee')) return '☕';
+            if (clean.includes('scene') || clean.includes('sparkle')) return '✨';
+            if (clean.includes('sun')) return '☀️';
+            if (clean.includes('moon') || clean.includes('night')) return '🌙';
+
+            return getDomainGlyph(domain);
+        }
+
+        function getDomainGlyph(domain) {
+            switch ((domain || '').toLowerCase()) {
+                case 'light': return '💡';
                 case 'fan': return '🌀';
+                case 'climate': return '🌡️';
                 case 'scene': return '✨';
-                case 'power': return '⏻';
-                case 'heat': return '♨';
-                case 'water': return '🚿';
-                case 'moon': return '🌙';
-                default: return '💡';
+                case 'switch': return '⏻';
+                case 'media_player': return '📺';
+                case 'cover': return '🪟';
+                case 'lock': return '🔒';
+                case 'vacuum': return '🧹';
+                case 'camera': return '📹';
+                case 'water_heater': return '🚿';
+                default: return '⏻';
             }
         }
 

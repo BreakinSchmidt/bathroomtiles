@@ -125,6 +125,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun saveFullConfig(newConfig: AppConfiguration) {
         viewModelScope.launch {
             repository.saveConfiguration(newConfig)
+            com.radialtiles.tile.RadialTileUpdater.requestAllTilesUpdate(getApplication())
             hapticManager.vibrateScene()
             audioManager.playSceneChime()
         }

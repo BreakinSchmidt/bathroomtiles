@@ -292,6 +292,7 @@
                 tab.className = 'tile-tab' + (idx === activePageIndex ? ' active' : '');
                 tab.textContent = `Tile ${idx + 1}: ${p.title}`;
                 tab.onclick = () => {
+                    syncActivePageFromDOM();
                     activePageIndex = idx;
                     renderTabs();
                     loadActivePageUI();
@@ -303,7 +304,10 @@
                 const addBtn = document.createElement('button');
                 addBtn.className = 'btn-add-tab';
                 addBtn.textContent = '+ Add Tile';
-                addBtn.onclick = addNewTile;
+                addBtn.onclick = () => {
+                    syncActivePageFromDOM();
+                    addNewTile();
+                };
                 container.appendChild(addBtn);
             }
         }
@@ -664,7 +668,44 @@
             `).join('');
         }
 
+        function syncActivePageFromDOM() {
+            const page = pages[activePageIndex];
+            if (!page) return;
+
+            const titleEl = document.getElementById('pageTitle');
+            if (titleEl && titleEl.value.trim()) {
+                page.title = titleEl.value.trim();
+            }
+
+            const countEl = document.getElementById('buttonCount');
+            if (countEl) {
+                const targetCount = parseInt(countEl.value);
+                while (page.buttons.length < targetCount) {
+                    const i = page.buttons.length;
+                    page.buttons.push({
+                        name: "Btn " + (i + 1),
+                        entityId: "",
+                        colorHex: PRESET_COLORS[i % PRESET_COLORS.length],
+                        iconName: "lightbulb"
+                    });
+                }
+                if (page.buttons.length > targetCount) {
+                    page.buttons = page.buttons.slice(0, targetCount);
+                }
+            }
+
+            page.buttons.forEach((btn, idx) => {
+                const labelEl = document.getElementById('btn_label_' + idx);
+                if (labelEl) btn.name = labelEl.value;
+                const entityEl = document.getElementById('btn_entity_' + idx);
+                if (entityEl) btn.entityId = entityEl.value.trim();
+                const iconEl = document.getElementById('btn_icon_' + idx);
+                if (iconEl) btn.iconName = iconEl.value.trim();
+            });
+        }
+
         function saveToWatch() {
+            syncActivePageFromDOM();
             const payload = {
                 haBaseUrl: document.getElementById('haUrl').value.trim(),
                 localHaUrl: document.getElementById('localHaUrl').value.trim(),

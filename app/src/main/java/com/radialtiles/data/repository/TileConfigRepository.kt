@@ -51,6 +51,7 @@ class TileConfigRepository(private val context: Context) {
         context.dataStore.edit { preferences ->
             preferences[KEY_CONFIG_JSON] = json.encodeToString(config)
         }
+        com.radialtiles.tile.RadialTileUpdater.requestAllTilesUpdate(context)
     }
 
     suspend fun updateHapticsEnabled(enabled: Boolean) {

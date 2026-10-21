@@ -1,8 +1,12 @@
 package com.radialtiles.tile
 
+import android.content.Context
+import android.os.PowerManager
 import android.util.Log
 import androidx.concurrent.futures.ResolvableFuture
 import androidx.wear.protolayout.*
+import androidx.wear.protolayout.expression.AnimationParameterBuilders
+import androidx.wear.protolayout.expression.DynamicBuilders
 import androidx.wear.protolayout.material.Text
 import androidx.wear.protolayout.material.Typography
 import androidx.wear.protolayout.material.layouts.PrimaryLayout
@@ -16,19 +20,30 @@ import com.radialtiles.data.model.AppConfiguration
 import com.radialtiles.data.model.ButtonConfig
 import com.radialtiles.data.model.DialPageConfig
 import com.radialtiles.data.repository.TileConfigRepository
+import androidx.compose.ui.graphics.toArgb
 import com.radialtiles.feedback.HapticFeedbackManager
+import com.radialtiles.presentation.theme.computeBrightenedColor
+import com.radialtiles.presentation.theme.parseHexColor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.PI
 
 abstract class BaseRadialTileService(private val pageIndex: Int) : TileService() {
 
     companion object {
         private const val TAG = "BaseRadialTileService"
 
-        // Counter for generating unique clickable tokens per tile build
+        // Persistent scope so in-flight Home Assistant requests survive after onTileRequest returns
+        private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        // Counter for generating unique clickable tokens per consumed click
         private val tokenCounter = java.util.concurrent.atomic.AtomicLong(1L)
+
+        // Stable active token per tile page so passive tile refreshes don't invalidate pending clicks
+        private val activePageTokens = java.util.concurrent.ConcurrentHashMap<Int, String>()
 
         // Bounded set of handled click tokens to prevent duplicate / ambient re-triggers
         private val handledTokens = java.util.Collections.newSetFromMap(
@@ -43,7 +58,7 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
     override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> {
         val future = ResolvableFuture.create<TileBuilders.Tile>()
 
-        CoroutineScope(Dispatchers.IO).launch {
+        serviceScope.launch {
             try {
                 val repository = TileConfigRepository(applicationContext)
                 val config = TileConfigRepository.cachedConfig
@@ -61,13 +76,16 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
 
                 // 1. Handle in-place tile button click if user tapped a sector on the watch
                 val lastClickableId = requestParams.currentState?.lastClickableId
+                var clickedButtonKey: String? = null
+                var clickSeq: Long = 0L
 
                 if (lastClickableId != null && lastClickableId.startsWith("toggle:")) {
                     val parts = lastClickableId.split(":")
                     if (parts.size >= 4) {
                         val entityId = parts[1]
                         val domain = parts[2]
-                        val token = parts[3]
+                        val buttonId = if (parts.size >= 5) parts[3] else entityId
+                        val token = if (parts.size >= 5) parts[4] else parts[3]
 
                         // Atomically verify and consume this click token
                         val isNewClick = synchronized(handledTokens) {
@@ -75,19 +93,43 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                         }
 
                         if (isNewClick) {
-                            val isSceneOrAutomation = domain in listOf("scene", "automation", "script")
-                            if (isSceneOrAutomation) {
-                                hapticManager.vibrateScene()
-                            } else {
-                                hapticManager.vibrateToggleOn()
-                            }
+                            val seq = tokenCounter.incrementAndGet()
+                            activePageTokens[pageIndex] = "tok_${pageIndex}_$seq"
+                            clickedButtonKey = buttonId
+                            clickSeq = seq
 
-                            // Fire HA toggle asynchronously in background
-                            CoroutineScope(Dispatchers.IO).launch {
+                            // Single vibration immediately when the button is pressed
+                            hapticManager.vibratePress()
+
+                            // Fire HA toggle asynchronously with a short WakeLock and verify server response
+                            serviceScope.launch {
+                                val powerManager = applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                                val wakeLock = runCatching {
+                                    powerManager?.newWakeLock(
+                                        PowerManager.PARTIAL_WAKE_LOCK,
+                                        "RadialTiles::ToggleWakeLock"
+                                    )?.apply {
+                                        setReferenceCounted(false)
+                                        acquire(10_000L)
+                                    }
+                                }.getOrNull()
+
                                 try {
-                                    haClient.toggleEntity(entityId, domain)
+                                    val confirmed = haClient.toggleEntity(entityId, domain)
+                                    if (confirmed) {
+                                        // Quick double vibration once the server confirms the action
+                                        hapticManager.vibrateServerConfirm()
+                                    } else {
+                                        Log.w(TAG, "Server did not confirm toggle for $entityId ($domain)")
+                                    }
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Failed HA toggle for $entityId", e)
+                                } finally {
+                                    runCatching {
+                                        if (wakeLock?.isHeld == true) {
+                                            wakeLock.release()
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -111,11 +153,18 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
 
                 val buttonsKey = page.buttons.joinToString("|") { "${it.id}_${it.name}_${it.colorHex}_${it.iconName}" }
                 val baseVersion = "${page.id}_${buttonsKey.hashCode()}"
-                val currentToken = "tok_${pageIndex}_${tokenCounter.incrementAndGet()}"
-                val resourceVersion = "${baseVersion}__TS__${currentToken}"
+                val currentToken = activePageTokens.getOrPut(pageIndex) {
+                    "tok_${pageIndex}_${tokenCounter.incrementAndGet()}"
+                }
 
-                // 3. Build ProtoLayout with interactive radial dial
-                val rootLayout = buildRadialTileLayout(page, requestParams, currentToken)
+                // 3. Build ProtoLayout with interactive radial dial and radial section highlight
+                val rootLayout = buildRadialTileLayout(
+                    page = page,
+                    requestParams = requestParams,
+                    token = currentToken,
+                    clickedButtonKey = clickedButtonKey,
+                    clickSeq = clickSeq
+                )
 
                 val timelineEntry = TimelineBuilders.TimelineEntry.Builder()
                     .setLayout(
@@ -126,7 +175,7 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                     .build()
 
                 val tile = TileBuilders.Tile.Builder()
-                    .setResourcesVersion(resourceVersion)
+                    .setResourcesVersion(baseVersion)
                     .setTileTimeline(
                         TimelineBuilders.Timeline.Builder()
                             .addTimelineEntry(timelineEntry)
@@ -168,7 +217,9 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
     private fun buildRadialTileLayout(
         page: DialPageConfig,
         requestParams: RequestBuilders.TileRequest,
-        token: String
+        token: String,
+        clickedButtonKey: String?,
+        clickSeq: Long
     ): LayoutElementBuilders.LayoutElement {
         val rootBox = LayoutElementBuilders.Box.Builder()
             .setWidth(DimensionBuilders.expand())
@@ -210,128 +261,68 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
             .build()
         rootBox.addContent(dialImage)
 
-        // 2. Clickable touch sectors overlay
-        val overlay = buildClickableTouchOverlay(page.buttons, token)
+        // 2. Clickable touch sectors overlay matching radial geometry
+        val screenDp = requestParams.deviceConfiguration.screenWidthDp
+            .takeIf { it > 0 }?.toFloat() ?: 227f
+        val overlay = buildClickableTouchOverlay(
+            buttons = page.buttons,
+            token = token,
+            screenDp = screenDp,
+            clickedButtonKey = clickedButtonKey,
+            clickSeq = clickSeq
+        )
         rootBox.addContent(overlay)
 
         return rootBox.build()
     }
 
-    private fun buildClickableTouchOverlay(buttons: List<ButtonConfig>, token: String): LayoutElementBuilders.LayoutElement {
+    private fun buildClickableTouchOverlay(
+        buttons: List<ButtonConfig>,
+        token: String,
+        screenDp: Float,
+        clickedButtonKey: String?,
+        clickSeq: Long
+    ): LayoutElementBuilders.LayoutElement {
         val count = buttons.size
         if (count == 0) return LayoutElementBuilders.Box.Builder().build()
 
-        return when (count) {
-            1 -> {
-                buildTouchSector(buttons[0], token)
-            }
-            2 -> {
-                // Top half -> button 0, Bottom half -> button 1
-                LayoutElementBuilders.Column.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.expand())
-                    .addContent(buildTouchSector(buttons[0], token, heightWeight = 1f))
-                    .addContent(buildTouchSector(buttons[1], token, heightWeight = 1f))
+        val outerMarginDp = screenDp * (6f / 454f)
+        val pieRadiusDp = ((screenDp / 2f) - outerMarginDp).coerceAtLeast(10f)
+
+        return when {
+            count == 1 -> {
+                val btn = buttons[0]
+                val isClicked = isButtonClicked(btn, clickedButtonKey)
+                val corner = ModifiersBuilders.Corner.Builder()
+                    .setRadius(DimensionBuilders.dp(pieRadiusDp))
                     .build()
-            }
-            3 -> {
-                // Slices: 0 is Top-Right, 1 is Bottom, 2 is Top-Left
-                val topRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[2], token, widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[0], token, widthWeight = 1f))
+                val background = ModifiersBuilders.Background.Builder()
+                    .setCorner(corner)
+                    .setColor(buildHighlightColorProp(btn, isClicked, clickSeq))
+                    .build()
+                val modifiers = ModifiersBuilders.Modifiers.Builder()
+                    .setClickable(buildButtonClickable(btn, token))
+                    .setBackground(background)
                     .build()
 
-                LayoutElementBuilders.Column.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.expand())
-                    .addContent(topRow)
-                    .addContent(buildTouchSector(buttons[1], token, heightWeight = 1f))
+                LayoutElementBuilders.Box.Builder()
+                    .setWidth(DimensionBuilders.dp(pieRadiusDp * 2f))
+                    .setHeight(DimensionBuilders.dp(pieRadiusDp * 2f))
+                    .setModifiers(modifiers)
                     .build()
             }
-            4 -> {
-                // Slices: 0 is North, 1 is East, 2 is South, 3 is West
-                val topRow = buildTouchSector(buttons[0], token, heightWeight = 1f)
-                val midRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[3], token, widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[1], token, widthWeight = 1f))
-                    .build()
-                val botRow = buildTouchSector(buttons[2], token, heightWeight = 1f)
-
-                LayoutElementBuilders.Column.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.expand())
-                    .addContent(topRow)
-                    .addContent(midRow)
-                    .addContent(botRow)
-                    .build()
-            }
-            5 -> {
-                // Slices: 0 (Top-Right), 1 (Mid-Right), 2 (Bottom), 3 (Mid-Left), 4 (Top-Left)
-                val topRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[4], token, widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[0], token, widthWeight = 1f))
-                    .build()
-
-                val midRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[3], token, widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[1], token, widthWeight = 1f))
-                    .build()
-
-                val botRow = buildTouchSector(buttons[2], token, heightWeight = 1f)
-
-                LayoutElementBuilders.Column.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.expand())
-                    .addContent(topRow)
-                    .addContent(midRow)
-                    .addContent(botRow)
-                    .build()
-            }
-            6 -> {
-                // 6 Radial buttons layout:
-                // Slices rotate clockwise starting at 12 o'clock (-90°):
-                // 0: Top-Right (12-2 o'clock), 1: Mid-Right (2-4 o'clock), 2: Bot-Right (4-6 o'clock)
-                // 3: Bot-Left (6-8 o'clock),   4: Mid-Left (8-10 o'clock), 5: Top-Left (10-12 o'clock)
-                val topRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[5], token, widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[0], token, widthWeight = 1f))
-                    .build()
-
-                val midRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1.1f))
-                    .addContent(buildTouchSector(buttons[4], token, widthWeight = 1.1f))
-                    .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.weight(0.8f)).build())
-                    .addContent(buildTouchSector(buttons[1], token, widthWeight = 1.1f))
-                    .build()
-
-                val botRow = LayoutElementBuilders.Row.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.weight(1f))
-                    .addContent(buildTouchSector(buttons[3], token, widthWeight = 1f))
-                    .addContent(buildTouchSector(buttons[2], token, widthWeight = 1f))
-                    .build()
-
-                LayoutElementBuilders.Column.Builder()
-                    .setWidth(DimensionBuilders.expand())
-                    .setHeight(DimensionBuilders.expand())
-                    .addContent(topRow)
-                    .addContent(midRow)
-                    .addContent(botRow)
-                    .build()
+            count in 2..6 -> {
+                buildRadialArcTouchOverlay(
+                    buttons = buttons,
+                    token = token,
+                    screenDp = screenDp,
+                    pieRadiusDp = pieRadiusDp,
+                    clickedButtonKey = clickedButtonKey,
+                    clickSeq = clickSeq
+                )
             }
             else -> {
-                // Fallback for > 6 buttons: 2 columns x rows grid
+                // > 6 buttons: 2 columns x 3 rows rounded-cell grid
                 val col = LayoutElementBuilders.Column.Builder()
                     .setWidth(DimensionBuilders.expand())
                     .setHeight(DimensionBuilders.expand())
@@ -342,7 +333,16 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                         .setWidth(DimensionBuilders.expand())
                         .setHeight(DimensionBuilders.weight(1f))
                     rowButtons.forEach { b ->
-                        row.addContent(buildTouchSector(b, token, widthWeight = 1f))
+                        val isClicked = isButtonClicked(b, clickedButtonKey)
+                        row.addContent(
+                            buildGridTouchSector(
+                                btn = b,
+                                token = token,
+                                isClicked = isClicked,
+                                clickSeq = clickSeq,
+                                widthWeight = 1f
+                            )
+                        )
                     }
                     col.addContent(row.build())
                 }
@@ -351,21 +351,173 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
         }
     }
 
-    private fun buildTouchSector(
+    /**
+     * Builds a radial pie-slice overlay using ProtoLayout Arc + butt-capped ArcLine wedges.
+     * Each ArcLine extends radially from the center to pieRadiusDp and sweeps the exact angle
+     * of its corresponding slice in RadialTileBitmapRenderer.renderPieBitmap, so both hit-testing
+     * and the tap highlight match the radial section rather than a rectangle.
+     */
+    private fun buildRadialArcTouchOverlay(
+        buttons: List<ButtonConfig>,
+        token: String,
+        screenDp: Float,
+        pieRadiusDp: Float,
+        clickedButtonKey: String?,
+        clickSeq: Long
+    ): LayoutElementBuilders.LayoutElement {
+        val count = buttons.size
+        val sweepAngle = 360f / count
+        val startAngleOffset = when (count) {
+            1 -> 0f
+            2 -> 180f
+            4 -> -135f
+            else -> -90f
+        }
+        val gapPx = 6f
+        val outerRadiusPx = (454f / 2f) - 6f
+        val angleGap = (gapPx / outerRadiusPx) * (180f / PI.toFloat())
+        val effectiveSweep = (sweepAngle - angleGap).coerceAtLeast(1f)
+
+        // Convert Canvas angle (0° = 3 o'clock) to ProtoLayout Arc angle (0° = 12 o'clock)
+        val firstSliceStartDeg = ((startAngleOffset + 90f + (angleGap / 2f)) % 360f + 360f) % 360f
+
+        val arcBuilder = LayoutElementBuilders.Arc.Builder()
+            .setAnchorType(LayoutElementBuilders.ARC_ANCHOR_START)
+            .setAnchorAngle(DimensionBuilders.degrees(firstSliceStartDeg))
+
+        buttons.forEachIndexed { index, btn ->
+            val isClicked = isButtonClicked(btn, clickedButtonKey)
+            val sliceModifiers = ModifiersBuilders.ArcModifiers.Builder()
+                .setClickable(buildButtonClickable(btn, token))
+                .build()
+
+            val sliceArcLine = LayoutElementBuilders.ArcLine.Builder()
+                .setLength(DimensionBuilders.degrees(effectiveSweep))
+                .setThickness(DimensionBuilders.dp(pieRadiusDp))
+                .setStrokeCap(LayoutElementBuilders.STROKE_CAP_BUTT)
+                .setColor(buildHighlightColorProp(btn, isClicked, clickSeq))
+                .setModifiers(sliceModifiers)
+                .build()
+
+            arcBuilder.addContent(sliceArcLine)
+
+            if (index < count - 1) {
+                val spacer = LayoutElementBuilders.ArcSpacer.Builder()
+                    .setLength(DimensionBuilders.degrees(angleGap))
+                    .setThickness(DimensionBuilders.dp(1f))
+                    .build()
+                arcBuilder.addContent(spacer)
+            }
+        }
+
+        // Small center cap matching innerRadius (12px at 454px) to keep the center hub pure AMOLED black
+        val innerRadiusDp = (screenDp * (12f / 454f)).coerceAtLeast(3f)
+        val centerCapModifiers = ModifiersBuilders.Modifiers.Builder()
+            .setBackground(
+                ModifiersBuilders.Background.Builder()
+                    .setColor(ColorBuilders.argb(0xFF000000.toInt()))
+                    .setCorner(
+                        ModifiersBuilders.Corner.Builder()
+                            .setRadius(DimensionBuilders.dp(innerRadiusDp))
+                            .build()
+                    )
+                    .build()
+            )
+            .build()
+
+        val centerCap = LayoutElementBuilders.Box.Builder()
+            .setWidth(DimensionBuilders.dp(innerRadiusDp * 2f))
+            .setHeight(DimensionBuilders.dp(innerRadiusDp * 2f))
+            .setModifiers(centerCapModifiers)
+            .build()
+
+        return LayoutElementBuilders.Box.Builder()
+            .setWidth(DimensionBuilders.dp(pieRadiusDp * 2f))
+            .setHeight(DimensionBuilders.dp(pieRadiusDp * 2f))
+            .addContent(arcBuilder.build())
+            .addContent(centerCap)
+            .build()
+    }
+
+    private fun isButtonClicked(btn: ButtonConfig, clickedButtonKey: String?): Boolean {
+        if (clickedButtonKey.isNullOrBlank()) return false
+        val key = btn.id.ifBlank { btn.entityId }
+        return key == clickedButtonKey || btn.entityId == clickedButtonKey
+    }
+
+    private fun buildButtonClickable(
+        btn: ButtonConfig,
+        token: String
+    ): ModifiersBuilders.Clickable {
+        val buttonKey = btn.id.ifBlank { btn.entityId }.replace(":", "_")
+        val clickAction = ActionBuilders.LoadAction.Builder().build()
+        return ModifiersBuilders.Clickable.Builder()
+            .setOnClick(clickAction)
+            .setId("toggle:${btn.entityId}:${btn.domain}:$buttonKey:$token")
+            // Disable the default rectangular system ripple so only the radial section highlights
+            .setVisualFeedbackEnabled(false)
+            .build()
+    }
+
+    /**
+     * Returns a transparent color for idle slices, or a self-decaying client-side animated highlight
+     * (fading from brightened button color to transparent in 450ms) for the just-pressed slice.
+     */
+    private fun buildHighlightColorProp(
+        btn: ButtonConfig,
+        isClicked: Boolean,
+        clickSeq: Long
+    ): ColorBuilders.ColorProp {
+        if (!isClicked) {
+            return ColorBuilders.argb(0x00000000)
+        }
+
+        val brightenedRgb = computeBrightenedColor(parseHexColor(btn.colorHex)).toArgb() and 0x00FFFFFF
+        val startArgb = (0x99 shl 24) or brightenedRgb
+        // Alpha is 0x00 (fully transparent) at the end of the animation; low bits encode clickSeq
+        // so consecutive clicks on the same slice produce a fresh dynamic expression fingerprint.
+        val endArgb = (clickSeq.toInt() and 0x00FFFFFF)
+
+        val animSpec = AnimationParameterBuilders.AnimationSpec.Builder()
+            .setAnimationParameters(
+                AnimationParameterBuilders.AnimationParameters.Builder()
+                    .setDurationMillis(450L)
+                    .setEasing(AnimationParameterBuilders.Easing.cubicBezier(0.2f, 0.0f, 0.0f, 1.0f))
+                    .build()
+            )
+            .build()
+
+        return ColorBuilders.ColorProp.Builder(0x00000000)
+            .setDynamicValue(
+                DynamicBuilders.DynamicColor.animate(startArgb, endArgb, animSpec)
+            )
+            .build()
+    }
+
+    private fun buildGridTouchSector(
         btn: ButtonConfig,
         token: String,
+        isClicked: Boolean,
+        clickSeq: Long,
         widthWeight: Float? = null,
         heightWeight: Float? = null
     ): LayoutElementBuilders.LayoutElement {
-        val clickAction = ActionBuilders.LoadAction.Builder().build()
-        val clickable = ModifiersBuilders.Clickable.Builder()
-            .setOnClick(clickAction)
-            .setId("toggle:${btn.entityId}:${btn.domain}:$token")
-            .setVisualFeedbackEnabled(true)
+        val corner = ModifiersBuilders.Corner.Builder()
+            .setRadius(DimensionBuilders.dp(18f))
+            .build()
+        val background = ModifiersBuilders.Background.Builder()
+            .setCorner(corner)
+            .setColor(buildHighlightColorProp(btn, isClicked, clickSeq))
             .build()
 
         val modifiers = ModifiersBuilders.Modifiers.Builder()
-            .setClickable(clickable)
+            .setClickable(buildButtonClickable(btn, token))
+            .setBackground(background)
+            .setPadding(
+                ModifiersBuilders.Padding.Builder()
+                    .setAll(DimensionBuilders.dp(4f))
+                    .build()
+            )
             .build()
 
         val box = LayoutElementBuilders.Box.Builder()

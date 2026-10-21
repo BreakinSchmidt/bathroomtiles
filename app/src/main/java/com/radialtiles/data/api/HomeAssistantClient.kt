@@ -3,6 +3,7 @@ package com.radialtiles.data.api
 import android.util.Log
 import com.radialtiles.data.model.HaEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import okhttp3.*
@@ -34,23 +35,55 @@ class HomeAssistantClient(
         private val sslSocketFactory = SSLContext.getInstance("TLS").apply {
             init(null, trustAllCerts, SecureRandom())
         }.socketFactory
+
+        @Volatile
+        private var lastWorkingBaseUrl: String? = null
+
+        private val fastCheckClient = OkHttpClient.Builder()
+            .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
+            .retryOnConnectionFailure(true)
+            .connectTimeout(2500, TimeUnit.MILLISECONDS)
+            .readTimeout(2500, TimeUnit.MILLISECONDS)
+            .build()
+
+        private val serviceClient = OkHttpClient.Builder()
+            .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
+            .retryOnConnectionFailure(true)
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .writeTimeout(5, TimeUnit.SECONDS)
+            .build()
+
+        private val regularClient = OkHttpClient.Builder()
+            .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
+            .retryOnConnectionFailure(true)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
     }
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val fastCheckClient = OkHttpClient.Builder()
-        .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
-        .hostnameVerifier { _, _ -> true }
-        .connectTimeout(1200, TimeUnit.MILLISECONDS)
-        .readTimeout(1200, TimeUnit.MILLISECONDS)
-        .build()
+    private fun getCandidateBaseUrls(): List<String> {
+        val local = getLocalUrl().trim().trimEnd('/')
+        val remote = getBaseUrl().trim().trimEnd('/')
+        val candidates = mutableListOf<String>()
 
-    private val regularClient = OkHttpClient.Builder()
-        .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
-        .hostnameVerifier { _, _ -> true }
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
+        val cached = lastWorkingBaseUrl
+        if (!cached.isNullOrBlank() && (cached == local || cached == remote)) {
+            candidates.add(cached)
+        }
+        if (local.isNotBlank() && !candidates.contains(local)) {
+            candidates.add(local)
+        }
+        if (remote.isNotBlank() && !candidates.contains(remote)) {
+            candidates.add(remote)
+        }
+        return candidates
+    }
 
     /**
      * Determines active base URL: tries local URL first if provided; if unreachable, falls back to remote Nabu Casa URL.
@@ -60,25 +93,35 @@ class HomeAssistantClient(
         val remote = getBaseUrl().trim().trimEnd('/')
 
         if (local.isNotBlank()) {
+            if (remote.isBlank()) {
+                return@withContext local
+            }
             try {
                 val req = Request.Builder()
                     .url("$local/api/")
                     .header("Authorization", "Bearer ${getToken()}")
                     .build()
-                val response = fastCheckClient.newCall(req).execute()
-                if (response.isSuccessful) {
-                    Log.d(TAG, "Using ultra-low-latency local HA URL: $local")
-                    return@withContext local
+                fastCheckClient.newCall(req).execute().use { response ->
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Using ultra-low-latency local HA URL: $local")
+                        lastWorkingBaseUrl = local
+                        return@withContext local
+                    }
                 }
             } catch (e: Exception) {
                 Log.d(TAG, "Local HA URL not reachable ($local): ${e.message}")
             }
         }
 
-        return@withContext remote
+        return@withContext remote.ifBlank { local }
     }
 
-    private fun executeWithFallback(targetUrl: String, token: String, postBody: RequestBody? = null): Response {
+    private fun executeWithFallback(
+        targetUrl: String,
+        token: String,
+        postBody: RequestBody? = null,
+        client: OkHttpClient = regularClient
+    ): Response {
         val buildReq = { u: String ->
             val b = Request.Builder().url(u).header("Authorization", "Bearer $token")
             if (postBody != null) b.post(postBody) else b.get()
@@ -86,7 +129,7 @@ class HomeAssistantClient(
         }
 
         return try {
-            regularClient.newCall(buildReq(targetUrl)).execute()
+            client.newCall(buildReq(targetUrl)).execute()
         } catch (e: Exception) {
             // If https failed on a plaintext http port, try http
             val altUrl = when {
@@ -96,7 +139,7 @@ class HomeAssistantClient(
             }
             if (altUrl != null) {
                 Log.w(TAG, "Call to $targetUrl failed (${e.message}), attempting fallback to $altUrl")
-                regularClient.newCall(buildReq(altUrl)).execute()
+                client.newCall(buildReq(altUrl)).execute()
             } else {
                 throw e
             }
@@ -104,7 +147,8 @@ class HomeAssistantClient(
     }
 
     /**
-     * Calls a service in Home Assistant (e.g. light.toggle, switch.toggle, scene.turn_on).
+     * Calls a service in Home Assistant (e.g. light.toggle, switch.toggle, scene.turn_on)
+     * and verifies that the server responded with a valid HTTP 2xx JSON payload.
      */
     suspend fun callService(
         domain: String,
@@ -112,14 +156,13 @@ class HomeAssistantClient(
         entityId: String,
         extraData: Map<String, Any> = emptyMap()
     ): Boolean = withContext(Dispatchers.IO) {
-        val baseUrl = resolveActiveBaseUrl()
-        val token = getToken()
-        if (baseUrl.isBlank() || token.isBlank()) {
+        val candidates = getCandidateBaseUrls()
+        val token = getToken().trim()
+        if (candidates.isEmpty() || token.isBlank()) {
             Log.w(TAG, "Cannot call service: missing baseUrl or token")
             return@withContext false
         }
 
-        val url = "$baseUrl/api/services/$domain/$service"
         val payload = buildJsonObject {
             put("entity_id", entityId)
             extraData.forEach { (key, value) ->
@@ -131,19 +174,39 @@ class HomeAssistantClient(
                 }
             }
         }
+        val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
 
-        try {
-            executeWithFallback(url, token, payload.toString().toRequestBody(JSON_MEDIA_TYPE)).use { response ->
-                val success = response.isSuccessful
-                if (!success) {
-                    Log.e(TAG, "Call service failed: ${response.code} ${response.message}")
+        // Up to 2 passes across candidate URLs so a cold radio wake-up on the first press
+        // automatically retries and succeeds without requiring a second button press.
+        for (attempt in 1..2) {
+            for (baseUrl in candidates) {
+                val url = "$baseUrl/api/services/$domain/$service"
+                try {
+                    executeWithFallback(url, token, requestBody, serviceClient).use { response ->
+                        val bodyText = response.body?.string()?.trim()
+                        val hasValidServerPayload = bodyText != null &&
+                            (bodyText.startsWith("[") || bodyText.startsWith("{"))
+                        if (response.isSuccessful && hasValidServerPayload) {
+                            lastWorkingBaseUrl = baseUrl
+                            Log.d(TAG, "HA server confirmed $domain.$service for $entityId via $baseUrl (HTTP ${response.code})")
+                            return@withContext true
+                        } else {
+                            Log.e(
+                                TAG,
+                                "Call service unconfirmed (attempt $attempt) via $baseUrl: HTTP ${response.code} ${response.message}, body=$bodyText"
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Attempt $attempt failed calling $domain/$service for $entityId via $baseUrl: ${e.message}")
                 }
-                return@withContext success
             }
-        } catch (e: IOException) {
-            Log.e(TAG, "Network exception calling service $domain/$service for $entityId", e)
-            return@withContext false
+            if (attempt == 1) {
+                delay(250L)
+            }
         }
+
+        return@withContext false
     }
 
     suspend fun toggleEntity(entityId: String, domain: String): Boolean {

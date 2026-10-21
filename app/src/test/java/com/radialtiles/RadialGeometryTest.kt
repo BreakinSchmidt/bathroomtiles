@@ -119,4 +119,30 @@ class RadialGeometryTest {
         assertEquals("scene", ButtonConfig.inferDomain("scene.romantic"))
         assertEquals("automation", ButtonConfig.inferDomain("automation.motion_sensor"))
     }
+
+    @Test
+    fun testProtoLayoutArcAnglesMatchCanvasPieSlices() {
+        val gapPx = 6f
+        val outerRadiusPx = (454f / 2f) - 6f
+        val angleGap = (gapPx / outerRadiusPx) * (180f / PI.toFloat())
+
+        for (count in 2..6) {
+            val sweepAngle = 360f / count
+            val startAngleOffset = when (count) {
+                2 -> 180f
+                4 -> -135f
+                else -> -90f
+            }
+            val effectiveSweep = sweepAngle - angleGap
+            val firstSliceStartDeg = ((startAngleOffset + 90f + (angleGap / 2f)) % 360f + 360f) % 360f
+
+            for (index in 0 until count) {
+                val canvasStart = ((startAngleOffset + index * sweepAngle + angleGap / 2f) % 360f + 360f) % 360f
+                val protoStart = (firstSliceStartDeg + index * (effectiveSweep + angleGap)) % 360f
+                // ProtoLayout 0° is 12 o'clock (-90° Canvas), so protoStart == (canvasStart + 90°) % 360°
+                val expectedProtoStart = (canvasStart + 90f) % 360f
+                assertEquals(expectedProtoStart, protoStart, 0.01f)
+            }
+        }
+    }
 }

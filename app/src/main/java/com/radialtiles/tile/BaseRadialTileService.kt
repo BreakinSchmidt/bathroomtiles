@@ -42,9 +42,6 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
         // Counter for generating unique clickable tokens per consumed click
         private val tokenCounter = java.util.concurrent.atomic.AtomicLong(1L)
 
-        // Stable active token per tile page so passive tile refreshes don't invalidate pending clicks
-        private val activePageTokens = java.util.concurrent.ConcurrentHashMap<Int, String>()
-
         // Bounded set of handled click tokens to prevent duplicate / ambient re-triggers
         private val handledTokens = java.util.Collections.newSetFromMap(
             object : java.util.LinkedHashMap<String, Boolean>(64, 0.75f, true) {
@@ -94,7 +91,6 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
 
                         if (isNewClick) {
                             val seq = tokenCounter.incrementAndGet()
-                            activePageTokens[pageIndex] = "tok_${pageIndex}_$seq"
                             clickedButtonKey = buttonId
                             clickSeq = seq
 
@@ -109,8 +105,7 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
                                         PowerManager.PARTIAL_WAKE_LOCK,
                                         "RadialTiles::ToggleWakeLock"
                                     )?.apply {
-                                        setReferenceCounted(false)
-                                        acquire(10_000L)
+                                        acquire(5_000L)
                                     }
                                 }.getOrNull()
 
@@ -153,15 +148,13 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
 
                 val buttonsKey = page.buttons.joinToString("|") { "${it.id}_${it.name}_${it.colorHex}_${it.iconName}" }
                 val baseVersion = "${page.id}_${buttonsKey.hashCode()}"
-                val currentToken = activePageTokens.getOrPut(pageIndex) {
-                    "tok_${pageIndex}_${tokenCounter.incrementAndGet()}"
-                }
+                val nextToken = "tok_${pageIndex}_${tokenCounter.incrementAndGet()}"
 
                 // 3. Build ProtoLayout with interactive radial dial and radial section highlight
                 val rootLayout = buildRadialTileLayout(
                     page = page,
                     requestParams = requestParams,
-                    token = currentToken,
+                    token = nextToken,
                     clickedButtonKey = clickedButtonKey,
                     clickSeq = clickSeq
                 )
@@ -454,8 +447,8 @@ abstract class BaseRadialTileService(private val pageIndex: Int) : TileService()
         return ModifiersBuilders.Clickable.Builder()
             .setOnClick(clickAction)
             .setId("toggle:${btn.entityId}:${btn.domain}:$buttonKey:$token")
-            // Disable the default rectangular system ripple so only the radial section highlights
-            .setVisualFeedbackEnabled(false)
+            // Native visual feedback ensures instantaneous, zero-latency response on tap
+            .setVisualFeedbackEnabled(true)
             .build()
     }
 

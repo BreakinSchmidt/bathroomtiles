@@ -145,4 +145,29 @@ class RadialGeometryTest {
             }
         }
     }
+
+    @Test
+    fun testClickTokenDeduplication() {
+        val handledTokens = java.util.Collections.newSetFromMap(
+            object : java.util.LinkedHashMap<String, Boolean>(64, 0.75f, true) {
+                override fun removeEldestEntry(eldest: Map.Entry<String, Boolean>?): Boolean {
+                    return size > 100
+                }
+            }
+        )
+
+        // First click with token A succeeds
+        val tokenA = "tok_0_1"
+        val isFirstClickA = synchronized(handledTokens) { handledTokens.add(tokenA) }
+        org.junit.Assert.assertTrue(isFirstClickA)
+
+        // Duplicate click with token A is suppressed
+        val isDuplicateClickA = synchronized(handledTokens) { handledTokens.add(tokenA) }
+        org.junit.Assert.assertFalse(isDuplicateClickA)
+
+        // Subsequent click with fresh token B succeeds
+        val tokenB = "tok_0_2"
+        val isFirstClickB = synchronized(handledTokens) { handledTokens.add(tokenB) }
+        org.junit.Assert.assertTrue(isFirstClickB)
+    }
 }

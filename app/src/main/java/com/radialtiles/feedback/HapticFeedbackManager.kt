@@ -6,6 +6,7 @@ import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 
 class HapticFeedbackManager(private val context: Context) {
 
@@ -23,13 +24,17 @@ class HapticFeedbackManager(private val context: Context) {
         val vib = vibrator ?: return
         if (!isEnabled || !vib.hasVibrator()) return
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val attrs = VibrationAttributes.Builder()
-                .setUsage(VibrationAttributes.USAGE_HARDWARE_FEEDBACK)
-                .build()
-            vib.vibrate(effect, attrs)
-        } else {
-            vib.vibrate(effect)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val attrs = VibrationAttributes.Builder()
+                    .setUsage(VibrationAttributes.USAGE_TOUCH)
+                    .build()
+                vib.vibrate(effect, attrs)
+            } else {
+                vib.vibrate(effect)
+            }
+        }.onFailure { e ->
+            Log.w("HapticFeedbackManager", "Vibration failed: ${e.message}")
         }
     }
 
